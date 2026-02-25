@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: imi-backend
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: MONGO_URI
+        sync: false        # Set this in Render Dashboard → Environment
+      - key: JWT_SECRET
+        sync: false        # Set this in Render Dashboard → Environment
+      - key: PAYU_MERCHANT_KEY
+        sync: false
+      - key: PAYU_MERCHANT_SALT
+        sync: false
+      - key: PAYU_BASE_URL
+        value: https://secure.payu.in
+      - key: BACKEND_URL
+        sync: false        # Set to your Render service URL e.g. https://imi-backend.onrender.com
+      - key: FRONTEND_URL
+        sync: false        # Set to your frontend URL

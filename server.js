@@ -55,21 +55,21 @@ app.use((err, req, res, next) => {
 
 // ─── START SERVER ────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
+const HOST = "0.0.0.0"; // Required for Render / cloud deployments
 
 async function startServer() {
     try {
         await connectDB();
-        app.listen(PORT, () => {
-            console.log(`🚀 Server running on port ${PORT}`);
-            console.log(`📡 API available at http://localhost:${PORT}/api`);
+        app.listen(PORT, HOST, () => {
+            console.log(`🚀 Server running on ${HOST}:${PORT}`);
+            console.log(`📡 API available at http://${HOST}:${PORT}/api`);
         });
     } catch (err) {
         console.error("\nFailed to start server because MongoDB connection failed.");
         console.error("Possible fixes:");
-        console.error("- Verify `MONGO_URI` is set correctly in the .env file at the project root.");
-        console.error("- If using MongoDB Atlas, add your current IP (or 0.0.0.0/0 for testing) to Network Access (IP whitelist): https://www.mongodb.com/docs/atlas/security-whitelist/");
-        console.error("- Ensure the database user and password are valid and that the user has appropriate DB privileges.");
-        console.error("After fixing, restart the server (nodemon will restart automatically when files change).");
+        console.error("- Set MONGO_URI in Render Dashboard → Environment Variables.");
+        console.error("- In MongoDB Atlas → Network Access → add 0.0.0.0/0 to allow all IPs.");
+        console.error("- Ensure the database user and password are valid.");
         process.exit(1);
     }
 }
