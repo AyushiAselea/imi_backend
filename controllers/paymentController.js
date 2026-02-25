@@ -1,4 +1,6 @@
 const crypto = require("crypto");
+const https = require("https");
+const querystring = require("querystring");
 const Product = require("../models/Product");
 const Order = require("../models/Order");
 
@@ -31,26 +33,33 @@ const verifyHash = (params) => {
  */
 const createPayment = async (req, res) => {
     try {
-        const { productId, quantity = 1 } = req.body;
+        const { productId, quantity = 1, productName, price: inlinePrice } = req.body;
 
-        if (!productId) {
-            return res.status(400).json({ message: "productId is required" });
+        let productDbId = null;
+        let productinfo;
+        let amount;
+
+        if (productId) {
+            // Look up from DB
+            const product = await Product.findById(productId);
+            if (!product) {
+                return res.status(404).json({ message: "Product not found" });
+            }
+            if (product.stock < quantity) {
+                return res.status(400).json({
+                    message: `Insufficient stock for "${product.name}". Available: ${product.stock}`,
+                });
+            }
+            productDbId = product._id;
+            productinfo = product.name;
+            amount = (product.price * quantity).toFixed(2);
+        } else if (productName && inlinePrice) {
+            // Inline product details — no DB lookup needed
+            productinfo = productName;
+            amount = (parseFloat(inlinePrice) * quantity).toFixed(2);
+        } else {
+            return res.status(400).json({ message: "Either productId or productName + price is required" });
         }
-
-        // Fetch product from database
-        const product = await Product.findById(productId);
-        if (!product) {
-            return res.status(404).json({ message: "Product not found" });
-        }
-
-        if (product.stock < quantity) {
-            return res.status(400).json({
-                message: `Insufficient stock for "${product.name}". Available: ${product.stock}`,
-            });
-        }
-
-        // Calculate total amount
-        const amount = (product.price * quantity).toFixed(2);
 
         // Generate unique transaction ID
         const txnid = `TXN_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
@@ -59,12 +68,12 @@ const createPayment = async (req, res) => {
         const firstname = req.user.name;
         const email = req.user.email;
         const phone = req.user.phone || "";
-        const productinfo = product.name;
 
         // PayU credentials
         const key = process.env.PAYU_MERCHANT_KEY;
         const salt = process.env.PAYU_MERCHANT_SALT;
-        const payuBaseUrl = process.env.PAYU_BASE_URL || "https://test.payu.in";
+        // Strip any trailing slash so the action URL is always clean
+        const payuBaseUrl = (process.env.PAYU_BASE_URL || "https://secure.payu.in").replace(/\/+$/, "");
 
         if (!key || !salt) {
             return res.status(500).json({ message: "PayU credentials not configured" });
@@ -74,14 +83,17 @@ const createPayment = async (req, res) => {
         const hash = generateHash({ key, txnid, amount, productinfo, firstname, email, salt });
 
         // Success and failure callback URLs
-        const baseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
+        const baseUrl = (process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/+$/, "");
         const surl = `${baseUrl}/api/payment/success`;
         const furl = `${baseUrl}/api/payment/failure`;
 
         // Create a pending order in database
+        const orderProducts = productDbId
+            ? [{ product: productDbId, quantity }]
+            : [{ productName: productinfo, quantity, price: parseFloat(amount) / quantity }];
         const order = await Order.create({
             user: req.user._id,
-            products: [{ product: product._id, quantity }],
+            products: orderProducts,
             totalAmount: parseFloat(amount),
             paymentId: txnid,
             paymentStatus: "Pending",
@@ -89,6 +101,7 @@ const createPayment = async (req, res) => {
         });
 
         // Return PayU form parameters
+        // The frontend must auto-submit a POST form to `action` with all these fields.
         const paymentData = {
             key,
             txnid,
@@ -210,4 +223,75 @@ const paymentFailure = async (req, res) => {
     }
 };
 
-module.exports = { createPayment, paymentSuccess, paymentFailure };
+/**
+ * @desc    Verify a PayU transaction using PayU's Verify Payment API
+ * @route   POST /api/payment/verify
+ * @access  Private
+ */
+const verifyPayment = async (req, res) => {
+    try {
+        const { txnid } = req.body;
+        if (!txnid) {
+            return res.status(400).json({ message: "txnid is required" });
+        }
+
+        const key  = process.env.PAYU_MERCHANT_KEY;
+        const salt = process.env.PAYU_MERCHANT_SALT;
+
+        // PayU verify hash: sha512(key|verify_payment|txnid|salt)
+        const commandString = `${key}|verify_payment|${txnid}|${salt}`;
+        const verifyHash = crypto.createHash("sha512").update(commandString).digest("hex");
+
+        const postData = querystring.stringify({
+            key,
+            command: "verify_payment",
+            var1: txnid,
+            hash: verifyHash,
+        });
+
+        const options = {
+            hostname: "info.payu.in",
+            path: "/merchant/postservice?form=2",
+            method: "POST",
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Content-Length": Buffer.byteLength(postData),
+            },
+        };
+
+        const payuResponse = await new Promise((resolve, reject) => {
+            const request = https.request(options, (response) => {
+                let data = "";
+                response.on("data", (chunk) => { data += chunk; });
+                response.on("end", () => {
+                    try { resolve(JSON.parse(data)); }
+                    catch (e) { resolve(data); }
+                });
+            });
+            request.on("error", reject);
+            request.write(postData);
+            request.end();
+        });
+
+        // Update local order with verified status
+        const order = await Order.findOne({ paymentId: txnid });
+        if (order && payuResponse?.transaction_details?.[txnid]) {
+            const txnStatus = payuResponse.transaction_details[txnid].status;
+            if (txnStatus === "success") {
+                order.paymentStatus = "Success";
+                order.status = "Processing";
+            } else if (txnStatus === "failure" || txnStatus === "failed") {
+                order.paymentStatus = "Failed";
+                order.status = "Cancelled";
+            }
+            await order.save();
+        }
+
+        res.status(200).json({ success: true, payuResponse, order });
+    } catch (error) {
+        console.error("Verify payment error:", error.message);
+        res.status(500).json({ message: "Server error verifying payment" });
+    }
+};
+
+module.exports = { createPayment, paymentSuccess, paymentFailure, verifyPayment };

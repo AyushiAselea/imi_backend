@@ -20,11 +20,25 @@ const productSchema = new mongoose.Schema(
             type: String,
             default: "",
         },
+        images: {
+            type: [String],
+            default: [],
+        },
         stock: {
             type: Number,
             required: [true, "Stock quantity is required"],
             min: [0, "Stock cannot be negative"],
             default: 0,
+        },
+        category: {
+            type: String,
+            default: "",
+            trim: true,
+        },
+        status: {
+            type: String,
+            enum: ["active", "inactive"],
+            default: "active",
         },
     },
     {

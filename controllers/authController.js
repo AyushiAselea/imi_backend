@@ -1,3 +1,5 @@
+const crypto = require("crypto");
+
 const User = require("../models/User");
 const generateToken = require("../utils/generateToken");
 
@@ -101,4 +103,44 @@ const getMe = async (req, res) => {
     }
 };
 
-module.exports = { registerUser, loginUser, logoutUser, getMe };
+/**
+ * @desc    Sync social auth user (Supabase/Firebase) with backend & get JWT
+ * @route   POST /api/auth/sync
+ * @access  Public
+ */
+const syncSocialUser = async (req, res) => {
+    try {
+        const { email, name, provider } = req.body;
+
+        if (!email) {
+            return res.status(400).json({ message: "Email is required" });
+        }
+
+        let user = await User.findOne({ email });
+
+        if (!user) {
+            // Create user with a random secure password (social auth users don't use it)
+            const randomPassword = crypto.randomBytes(32).toString("hex");
+            user = await User.create({
+                name: name || email.split("@")[0],
+                email,
+                password: randomPassword,
+            });
+        }
+
+        const token = generateToken(user._id);
+
+        res.json({
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            token,
+        });
+    } catch (error) {
+        console.error("Social sync error:", error.message);
+        res.status(500).json({ message: "Server error during social auth sync" });
+    }
+};
+
+module.exports = { registerUser, loginUser, logoutUser, getMe, syncSocialUser };
