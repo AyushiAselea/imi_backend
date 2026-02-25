@@ -187,7 +187,7 @@ const paymentSuccess = async (req, res) => {
         }
 
         // Redirect to frontend success page
-        const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+        const frontendUrl = (process.env.FRONTEND_URL || "http://localhost:8080").replace(/\/+$/, "");
         res.redirect(`${frontendUrl}/payment/success?txnid=${txnid}&mihpayid=${mihpayid}`);
     } catch (error) {
         console.error("Payment success handler error:", error.message);
@@ -215,7 +215,7 @@ const paymentFailure = async (req, res) => {
         console.warn("Payment failed for txnid:", txnid, "| Status:", status);
 
         // Redirect to frontend failure page
-        const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+        const frontendUrl = (process.env.FRONTEND_URL || "http://localhost:8080").replace(/\/+$/, "");
         res.redirect(`${frontendUrl}/payment/failure?txnid=${txnid}`);
     } catch (error) {
         console.error("Payment failure handler error:", error.message);
