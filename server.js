@@ -20,7 +20,30 @@ const settingsRoutes = require("./routes/settingsRoutes");
 const app = express();
 
 // ─── MIDDLEWARE ───────────────────────────────────────────────
-app.use(cors());
+// Explicitly allow the frontend origin (Vercel) + localhost for dev
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:8080",
+  "https://imi-ai-smartwear.vercel.app",
+  // Also allow whatever FRONTEND_URL is set to in Render env
+  ...(process.env.FRONTEND_URL
+    ? [process.env.FRONTEND_URL.replace(/\/+$/, "").replace(/^http:\/\//, "https://")]
+    : []),
+];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (mobile apps, Postman, PayU callbacks)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      callback(new Error(`CORS: Origin '${origin}' not allowed`));
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+  })
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
