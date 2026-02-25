@@ -20,10 +20,11 @@ const settingsRoutes = require("./routes/settingsRoutes");
 const app = express();
 
 // ─── MIDDLEWARE ───────────────────────────────────────────────
-// Explicitly allow the frontend origin (Vercel) + localhost for dev
+// Explicitly allow the frontend/admin origins (Vercel) + localhost for dev
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:8080",
+  "http://localhost:5174",  // admin dev server
   "https://imi-ai-smartwear.vercel.app",
   // Also allow whatever FRONTEND_URL is set to in Render env
   ...(process.env.FRONTEND_URL
@@ -36,6 +37,8 @@ app.use(
     origin: (origin, callback) => {
       // Allow requests with no origin (mobile apps, Postman, PayU callbacks)
       if (!origin) return callback(null, true);
+      // Allow all Vercel preview/production deployments (covers imi_admin on Vercel too)
+      if (origin.endsWith(".vercel.app")) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
       callback(new Error(`CORS: Origin '${origin}' not allowed`));
     },
