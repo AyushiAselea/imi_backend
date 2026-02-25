@@ -117,6 +117,9 @@ const getDashboard = async (req, res) => {
             topExitPages,
             dailyPageviews,
             avgSessionDuration,
+            browserBreakdown,
+            osBreakdown,
+            topButtonClicks,
         ] = await Promise.all([
             // Total pageviews
             Analytics.countDocuments({
@@ -204,6 +207,28 @@ const getDashboard = async (req, res) => {
                     },
                 },
             ]),
+
+            // Browser breakdown
+            Analytics.aggregate([
+                { $match: { eventType: "pageview", browser: { $ne: "" }, createdAt: { $gte: startDate } } },
+                { $group: { _id: "$browser", count: { $sum: 1 } } },
+                { $sort: { count: -1 } },
+            ]),
+
+            // OS breakdown
+            Analytics.aggregate([
+                { $match: { eventType: "pageview", os: { $ne: "" }, createdAt: { $gte: startDate } } },
+                { $group: { _id: "$os", count: { $sum: 1 } } },
+                { $sort: { count: -1 } },
+            ]),
+
+            // Top button clicks
+            Analytics.aggregate([
+                { $match: { eventType: "click", createdAt: { $gte: startDate } } },
+                { $group: { _id: "$metadata.buttonText", count: { $sum: 1 } } },
+                { $sort: { count: -1 } },
+                { $limit: 20 },
+            ]),
         ]);
 
         const bounceRate =
@@ -224,9 +249,12 @@ const getDashboard = async (req, res) => {
             avgSessionDurationSeconds: avgDuration,
             pageViewsByPage,
             deviceBreakdown,
+            browserBreakdown,
+            osBreakdown,
             topEntryPages,
             topExitPages,
             dailyPageviews,
+            topButtonClicks,
         });
     } catch (error) {
         console.error("Analytics dashboard error:", error.message);
