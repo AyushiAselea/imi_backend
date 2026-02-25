@@ -20,7 +20,7 @@ const getDashboardStats = async (req, res) => {
                 Order.countDocuments(),
                 User.countDocuments(),
                 Order.aggregate([
-                    { $match: { paymentStatus: "Success" } },
+                    { $match: { paymentStatus: { $in: ["Success", "Partial"] } } },
                     { $group: { _id: null, total: { $sum: "$totalAmount" } } },
                 ]),
                 AbandonedCart.countDocuments({ isAbandoned: true, isRecovered: false }),

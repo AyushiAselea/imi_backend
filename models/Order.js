@@ -1,5 +1,19 @@
 const mongoose = require("mongoose");
 
+const shippingAddressSchema = new mongoose.Schema(
+  {
+    fullName: { type: String, required: true },
+    phone: { type: String, required: true },
+    addressLine1: { type: String, required: true },
+    addressLine2: { type: String, default: "" },
+    city: { type: String, required: true },
+    state: { type: String, required: true },
+    postalCode: { type: String, required: true },
+    country: { type: String, default: "India" },
+  },
+  { _id: false }
+);
+
 const orderSchema = new mongoose.Schema(
     {
         user: {
@@ -36,6 +50,27 @@ const orderSchema = new mongoose.Schema(
             required: true,
             min: [0, "Total amount cannot be negative"],
         },
+        advanceAmount: {
+            type: Number,
+            default: 0,
+        },
+        remainingAmount: {
+            type: Number,
+            default: 0,
+        },
+        paymentMethod: {
+            type: String,
+            enum: ["ONLINE", "COD", "PARTIAL"],
+            default: "ONLINE",
+        },
+        deliveryPaymentPending: {
+            type: Boolean,
+            default: false,
+        },
+        shippingAddress: {
+            type: shippingAddressSchema,
+            default: null,
+        },
         status: {
             type: String,
             enum: ["Pending", "Processing", "Shipped", "Delivered", "Cancelled"],
@@ -47,7 +82,7 @@ const orderSchema = new mongoose.Schema(
         },
         paymentStatus: {
             type: String,
-            enum: ["Pending", "Success", "Failed"],
+            enum: ["Pending", "Success", "Failed", "Partial"],
             default: "Pending",
         },
     },

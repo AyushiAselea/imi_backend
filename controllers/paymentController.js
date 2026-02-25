@@ -28,19 +28,34 @@ const verifyHash = (params) => {
 
 /**
  * @desc    Create PayU payment — returns form fields for hosted checkout
+ *          Also handles COD and partial payment flows.
  * @route   POST /api/payment/create
  * @access  Private
  */
 const createPayment = async (req, res) => {
     try {
-        const { productId, quantity = 1, productName, price: inlinePrice } = req.body;
+        const {
+            productId,
+            quantity = 1,
+            productName,
+            price: inlinePrice,
+            paymentMethod = "ONLINE",     // "ONLINE" | "COD" | "PARTIAL"
+            shippingAddress,
+        } = req.body;
 
+        // ── Validate shipping address ────────────────────────
+        if (!shippingAddress || !shippingAddress.fullName || !shippingAddress.phone ||
+            !shippingAddress.addressLine1 || !shippingAddress.city ||
+            !shippingAddress.state || !shippingAddress.postalCode) {
+            return res.status(400).json({ message: "Complete shipping address is required" });
+        }
+
+        // ── Resolve product info ─────────────────────────────
         let productDbId = null;
         let productinfo;
-        let amount;
+        let totalAmount;
 
         if (productId) {
-            // Look up from DB
             const product = await Product.findById(productId);
             if (!product) {
                 return res.status(404).json({ message: "Product not found" });
@@ -52,56 +67,114 @@ const createPayment = async (req, res) => {
             }
             productDbId = product._id;
             productinfo = product.name;
-            amount = (product.price * quantity).toFixed(2);
+            totalAmount = parseFloat((product.price * quantity).toFixed(2));
         } else if (productName && inlinePrice) {
-            // Inline product details — no DB lookup needed
             productinfo = productName;
-            amount = (parseFloat(inlinePrice) * quantity).toFixed(2);
+            totalAmount = parseFloat((parseFloat(inlinePrice) * quantity).toFixed(2));
         } else {
             return res.status(400).json({ message: "Either productId or productName + price is required" });
         }
 
-        // Generate unique transaction ID
-        const txnid = `TXN_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+        // ── Calculate amounts based on paymentMethod ─────────
+        let advanceAmount = 0;
+        let remainingAmount = 0;
+        let chargeAmount = totalAmount; // amount to charge via PayU
+        let paymentStatus = "Pending";
+        let deliveryPaymentPending = false;
 
-        // User details from authenticated request
+        if (paymentMethod === "COD") {
+            chargeAmount = 0; // no online payment
+            remainingAmount = totalAmount;
+            paymentStatus = "Pending";
+            deliveryPaymentPending = true;
+        } else if (paymentMethod === "PARTIAL") {
+            advanceAmount = parseFloat((totalAmount * 0.5).toFixed(2));
+            remainingAmount = parseFloat((totalAmount - advanceAmount).toFixed(2));
+            chargeAmount = advanceAmount;
+            deliveryPaymentPending = true;
+        } else {
+            // ONLINE — full payment
+            advanceAmount = totalAmount;
+            remainingAmount = 0;
+            deliveryPaymentPending = false;
+        }
+
+        const orderProducts = productDbId
+            ? [{ product: productDbId, quantity }]
+            : [{ productName: productinfo, quantity, price: totalAmount / quantity }];
+
+        // ── COD: create order immediately (no PayU) ──────────
+        if (paymentMethod === "COD") {
+            const order = await Order.create({
+                user: req.user._id,
+                products: orderProducts,
+                totalAmount,
+                advanceAmount: 0,
+                remainingAmount: totalAmount,
+                paymentMethod: "COD",
+                paymentStatus: "Pending",
+                deliveryPaymentPending: true,
+                shippingAddress,
+                status: "Processing",
+            });
+
+            // Reduce stock
+            if (productDbId) {
+                const product = await Product.findById(productDbId);
+                if (product) {
+                    product.stock -= quantity;
+                    await product.save();
+                }
+            }
+
+            const populated = await Order.findById(order._id)
+                .populate("user", "name email")
+                .populate("products.product", "name price image");
+
+            return res.status(201).json({
+                success: true,
+                message: "COD order placed successfully",
+                paymentMethod: "COD",
+                order: populated,
+            });
+        }
+
+        // ── ONLINE or PARTIAL: initiate PayU payment ─────────
+        const txnid = `TXN_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
         const firstname = req.user.name;
         const email = req.user.email;
-        const phone = req.user.phone || "";
+        const phone = req.user.phone || shippingAddress.phone || "";
 
-        // PayU credentials
         const key = process.env.PAYU_MERCHANT_KEY;
         const salt = process.env.PAYU_MERCHANT_SALT;
-        // Strip any trailing slash so the action URL is always clean
         const payuBaseUrl = (process.env.PAYU_BASE_URL || "https://secure.payu.in").replace(/\/+$/, "");
 
         if (!key || !salt) {
             return res.status(500).json({ message: "PayU credentials not configured" });
         }
 
-        // Generate hash
+        const amount = chargeAmount.toFixed(2);
         const hash = generateHash({ key, txnid, amount, productinfo, firstname, email, salt });
 
-        // Success and failure callback URLs
         const baseUrl = (process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/+$/, "");
         const surl = `${baseUrl}/api/payment/success`;
         const furl = `${baseUrl}/api/payment/failure`;
 
-        // Create a pending order in database
-        const orderProducts = productDbId
-            ? [{ product: productDbId, quantity }]
-            : [{ productName: productinfo, quantity, price: parseFloat(amount) / quantity }];
+        // Create pending order
         const order = await Order.create({
             user: req.user._id,
             products: orderProducts,
-            totalAmount: parseFloat(amount),
+            totalAmount,
+            advanceAmount: paymentMethod === "PARTIAL" ? advanceAmount : totalAmount,
+            remainingAmount,
+            paymentMethod,
             paymentId: txnid,
             paymentStatus: "Pending",
+            deliveryPaymentPending,
+            shippingAddress,
             status: "Pending",
         });
 
-        // Return PayU form parameters
-        // The frontend must auto-submit a POST form to `action` with all these fields.
         const paymentData = {
             key,
             txnid,
@@ -120,6 +193,7 @@ const createPayment = async (req, res) => {
         res.status(200).json({
             success: true,
             message: "Payment initiated",
+            paymentMethod,
             paymentData,
         });
     } catch (error) {
@@ -173,7 +247,12 @@ const paymentSuccess = async (req, res) => {
             return res.status(404).json({ message: "Order not found" });
         }
 
-        order.paymentStatus = "Success";
+        // Set payment status based on payment method
+        if (order.paymentMethod === "PARTIAL") {
+            order.paymentStatus = "Partial";
+        } else {
+            order.paymentStatus = "Success";
+        }
         order.status = "Processing";
         await order.save();
 
