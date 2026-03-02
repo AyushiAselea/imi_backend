@@ -30,6 +30,19 @@ const settingsSchema = new mongoose.Schema(
             twitter: { type: String, default: "" },
             facebook: { type: String, default: "" },
         },
+        // Customisable email templates
+        emailTemplates: {
+            cartEmail: {
+                isEnabled:     { type: Boolean, default: true },
+                subject:       { type: String,  default: "🛒 {{productName}} is in your cart — complete your purchase!" },
+                customMessage: { type: String,  default: "Great choice! You just added **{{productName}}** to your cart. Don't wait — items sell out fast!" },
+            },
+            orderEmail: {
+                isEnabled:     { type: Boolean, default: true },
+                subject:       { type: String,  default: "✅ Order Confirmed — {{paymentMethod}} | IMI Smart Glasses" },
+                customMessage: { type: String,  default: "Your order has been placed successfully. We'll keep you updated at every step." },
+            },
+        },
         // Third-party tracking settings
         tracking: {
             facebookPixelId: { type: String, default: "" },

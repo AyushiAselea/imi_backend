@@ -218,7 +218,7 @@ const updateSettings = async (req, res) => {
             settings = await Settings.create({});
         }
 
-        const fields = ["siteName", "contactEmail", "contactPhone", "address", "logo", "socialLinks", "tracking"];
+        const fields = ["siteName", "contactEmail", "contactPhone", "address", "logo", "socialLinks", "tracking", "emailTemplates"];
         fields.forEach((f) => {
             if (req.body[f] !== undefined) settings[f] = req.body[f];
         });

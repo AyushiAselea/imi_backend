@@ -1,4 +1,5 @@
 const nodemailer = require("nodemailer");
+const Settings   = require("../models/Settings");
 
 /* ─── Transporter (created once, reused) ──────────────────── */
 const transporter = nodemailer.createTransport({
@@ -31,13 +32,54 @@ const sendMail = async ({ to, subject, html, text }) => {
   return info;
 };
 
+/* ─── Helper: resolve template variables ──────────────────── */
+/**
+ * Replace {{variable}} placeholders in a string.
+ * @param {string} tpl  - template string
+ * @param {Object} vars - key → value map
+ * @returns {string}
+ */
+const substituteVars = (tpl = "", vars = {}) =>
+  tpl.replace(/\{\{(\w+)\}\}/g, (_, key) =>
+    vars[key] !== undefined ? vars[key] : `{{${key}}}`
+  );
+
 /* ─── Cart email: item added ─────────────────────────────── */
 const sendCartEmail = async (userEmail, userName, item) => {
-  const price = Number(item.price).toLocaleString("en-IN");
-  const subtotal = (item.price * item.quantity).toLocaleString("en-IN");
-  const variant = item.variant ? ` (${item.variant})` : "";
+  // ── Load admin-configured template (fall back to schema defaults) ──
+  let tplSubject  = "🛒 {{productName}} is in your cart — complete your purchase!";
+  let tplMessage  = "Great choice! You just added **{{productName}}** to your cart. Don't wait — items sell out fast!";
+  let isEnabled   = true;
+  try {
+    const settings = await Settings.findOne().select("emailTemplates").lean();
+    if (settings?.emailTemplates?.cartEmail) {
+      const ct = settings.emailTemplates.cartEmail;
+      if (ct.isEnabled === false) { isEnabled = false; }
+      if (ct.subject)       tplSubject = ct.subject;
+      if (ct.customMessage) tplMessage = ct.customMessage;
+    }
+  } catch (e) {
+    console.error("📧 emailService: could not load settings, using defaults", e.message);
+  }
+  if (!isEnabled) return null;  // admin disabled this email type
 
-  const shopUrl = process.env.FRONTEND_URL || "https://imiai.in";
+  const price    = Number(item.price).toLocaleString("en-IN");
+  const subtotal = (item.price * item.quantity).toLocaleString("en-IN");
+  const variant  = item.variant ? ` (${item.variant})` : "";
+  const shopUrl  = process.env.FRONTEND_URL || "https://imiai.in";
+
+  const vars = {
+    name:        userName || "there",
+    productName: item.name,
+    variant:     variant,
+    quantity:    String(item.quantity),
+    price:       `₹${price}`,
+    subtotal:    `₹${subtotal}`,
+  };
+  const resolvedSubject = substituteVars(tplSubject, vars);
+  // Convert basic **bold** markdown to <strong> for the message
+  const resolvedMessage = substituteVars(tplMessage, vars)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 
   const html = `
 <!DOCTYPE html>
@@ -61,7 +103,7 @@ const sendCartEmail = async (userEmail, userName, item) => {
         <tr><td style="padding:32px;">
           <p style="margin:0 0 6px;font-size:15px;color:#52525b;">Hi <strong style="color:#18181b;">${userName || "there"}</strong> 👋</p>
           <p style="margin:0 0 24px;font-size:15px;color:#52525b;line-height:1.6;">
-            Great choice! You just added <strong style="color:#18181b;">${item.name}${variant}</strong> to your cart. Here's a quick summary:
+            ${resolvedMessage}
           </p>
 
           <!-- Product card -->
@@ -109,27 +151,52 @@ const sendCartEmail = async (userEmail, userName, item) => {
 </html>
   `.trim();
 
-  const text = `Hi ${userName || "there"}, you added ${item.name}${variant} (Qty: ${item.quantity}) to your cart. Subtotal: ₹${subtotal}. Complete your purchase at ${shopUrl}/cart`;
+  const text = `Hi ${vars.name}, you added ${item.name}${variant} (Qty: ${item.quantity}) to your cart. Subtotal: ₹${subtotal}. Complete your purchase at ${shopUrl}/cart`;
 
-  return sendMail({
-    to: userEmail,
-    subject: `🛒 ${item.name} is in your cart — complete your purchase!`,
-    html,
-    text,
-  });
+  return sendMail({ to: userEmail, subject: resolvedSubject, html, text });
 };
 
-/* ─── Order confirmation email ───────────────────────────── */
 const sendOrderConfirmationEmail = async (userEmail, userName, order) => {
+  // ── Load admin-configured template (fall back to schema defaults) ──
+  let tplSubject  = "✅ Order Confirmed — {{paymentMethod}} | IMI Smart Glasses";
+  let tplMessage  = "Your order has been placed successfully. Here are the details:";
+  let isEnabled   = true;
+  try {
+    const settings = await Settings.findOne().select("emailTemplates").lean();
+    if (settings?.emailTemplates?.orderEmail) {
+      const ot = settings.emailTemplates.orderEmail;
+      if (ot.isEnabled === false) { isEnabled = false; }
+      if (ot.subject)       tplSubject = ot.subject;
+      if (ot.customMessage) tplMessage = ot.customMessage;
+    }
+  } catch (e) {
+    console.error("📧 emailService: could not load settings, using defaults", e.message);
+  }
+  if (!isEnabled) return null;
+
   const shopUrl = process.env.FRONTEND_URL || "https://imiai.in";
-  const total = Number(order.totalAmount).toLocaleString("en-IN");
-  const method = order.paymentMethod || "ONLINE";
-  const orderId = order._id;
+  const total   = Number(order.totalAmount).toLocaleString("en-IN");
+  const method  = order.paymentMethod || "ONLINE";
+  const orderId = String(order._id);
+
+  const methodLabel = method === "COD" ? "Cash on Delivery"
+    : method === "PARTIAL" ? "50% Advance Paid"
+    : "Paid Online";
+
+  const vars = {
+    name:          userName || "there",
+    orderId,
+    total:         `₹${total}`,
+    paymentMethod: methodLabel,
+  };
+  const resolvedSubject = substituteVars(tplSubject, vars);
+  const resolvedMessage = substituteVars(tplMessage, vars)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 
   const productsHtml = (order.products || []).map((p) => {
-    const name = p.product?.name || p.productName || "Product";
+    const name  = p.product?.name || p.productName || "Product";
     const price = p.product?.price || p.price || 0;
-    const qty = p.quantity || 1;
+    const qty   = p.quantity || 1;
     return `<tr>
       <td style="padding:8px 12px;border-bottom:1px solid #e4e4e7;font-size:13px;color:#18181b;">${name}</td>
       <td style="padding:8px 12px;border-bottom:1px solid #e4e4e7;font-size:13px;color:#52525b;text-align:center;">${qty}</td>
@@ -152,7 +219,7 @@ const sendOrderConfirmationEmail = async (userEmail, userName, order) => {
         <tr><td style="padding:32px;">
           <p style="margin:0 0 16px;font-size:15px;color:#52525b;">Hi <strong style="color:#18181b;">${userName || "there"}</strong>,</p>
           <p style="margin:0 0 24px;font-size:15px;color:#52525b;line-height:1.6;">
-            Your order has been placed successfully. Here are the details:
+            ${resolvedMessage}
           </p>
           <table role="presentation" width="100%" style="border:1px solid #e4e4e7;border-radius:10px;overflow:hidden;border-collapse:collapse;">
             <tr style="background:#f9fafb;">
@@ -173,7 +240,7 @@ const sendOrderConfirmationEmail = async (userEmail, userName, order) => {
             </tr>
             <tr>
               <td style="padding:8px 0;font-size:13px;color:#71717a;">Payment</td>
-              <td style="padding:8px 0;font-size:13px;color:#18181b;text-align:right;font-weight:600;">${method === "COD" ? "Cash on Delivery" : method === "PARTIAL" ? "50% Advance" : "Paid Online"}</td>
+              <td style="padding:8px 0;font-size:13px;color:#18181b;text-align:right;font-weight:600;">${methodLabel}</td>
             </tr>
           </table>
           <table role="presentation" width="100%" style="margin-top:28px;"><tr><td align="center">
@@ -194,9 +261,9 @@ const sendOrderConfirmationEmail = async (userEmail, userName, order) => {
 
   return sendMail({
     to: userEmail,
-    subject: `✅ Order Confirmed — ${method === "COD" ? "Pay on Delivery" : "Payment Received"} | IMI Smart Glasses`,
+    subject: resolvedSubject,
     html,
-    text: `Hi ${userName || "there"}, your order (${orderId}) for ₹${total} has been confirmed. Payment: ${method}. Track at ${shopUrl}/profile`,
+    text: `Hi ${vars.name}, your order (${orderId}) for ₹${total} has been confirmed. Payment: ${methodLabel}. Track at ${shopUrl}/profile`,
   });
 };
 
