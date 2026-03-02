@@ -1,4 +1,5 @@
 const Cart = require("../models/Cart");
+const { sendCartEmail } = require("../utils/emailService");
 
 /**
  * GET /api/cart — Get current user's cart
@@ -45,6 +46,14 @@ const addToCart = async (req, res) => {
     }
 
     await cart.save();
+
+    // Send "item added to cart" email — req.user already populated by auth middleware
+    if (req.user && req.user.email) {
+      sendCartEmail(req.user.email, req.user.name, { productId, name, price, image, variant, quantity })
+        .then(() => console.log(`📧 Cart email sent to ${req.user.email}`))
+        .catch((err) => console.error("Cart email failed:", err.message));
+    }
+
     res.json(cart);
   } catch (error) {
     console.error("addToCart error:", error);

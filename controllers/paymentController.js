@@ -3,6 +3,7 @@ const https = require("https");
 const querystring = require("querystring");
 const Product = require("../models/Product");
 const Order = require("../models/Order");
+const { sendOrderConfirmationEmail } = require("../utils/emailService");
 
 /**
  * Generate PayU hash using SHA-512.
@@ -130,6 +131,13 @@ const createPayment = async (req, res) => {
             const populated = await Order.findById(order._id)
                 .populate("user", "name email")
                 .populate("products.product", "name price image");
+
+            // Send order confirmation email (non-blocking) — req.user already has email/name
+            if (req.user && req.user.email) {
+                sendOrderConfirmationEmail(req.user.email, req.user.name, populated)
+                    .then(() => console.log(`📧 Order email sent to ${req.user.email}`))
+                    .catch((err) => console.error("Order email failed:", err.message));
+            }
 
             return res.status(201).json({
                 success: true,
@@ -263,6 +271,21 @@ const paymentSuccess = async (req, res) => {
                 product.stock -= item.quantity;
                 await product.save();
             }
+        }
+
+        // Send order confirmation email (non-blocking)
+        // PayU callback has no req.user — use the already-populated order.user
+        try {
+            const populated = await Order.findById(order._id)
+                .populate("user", "name email")
+                .populate("products.product", "name price image");
+            if (populated.user && populated.user.email) {
+                sendOrderConfirmationEmail(populated.user.email, populated.user.name, populated)
+                    .then(() => console.log(`📧 Order email sent to ${populated.user.email}`))
+                    .catch((err) => console.error("Order email failed:", err.message));
+            }
+        } catch (emailErr) {
+            console.error("Order email lookup failed:", emailErr.message);
         }
 
         // Redirect to frontend success page
