@@ -21,6 +21,10 @@ transporter.verify().then(() => {
 
 /* ─── Helper: send email ──────────────────────────────────── */
 const sendMail = async ({ to, subject, html, text }) => {
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    console.error("📧 SMTP_USER / SMTP_PASS env vars are NOT set — email skipped. Add them to Render dashboard under Environment.");
+    return null;
+  }
   const info = await transporter.sendMail({
     from: `"IMI Smart Glasses" <${process.env.SMTP_USER}>`,
     to,
