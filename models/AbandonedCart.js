@@ -3,7 +3,8 @@ const mongoose = require("mongoose");
 const abandonedCartSchema = new mongoose.Schema(
   {
     userId: {
-      type: mongoose.Schema.Types.ObjectId,
+      // String (not ObjectId) because social-login users have Firebase string UIDs
+      type: String,
       ref: "User",
       default: null,
     },

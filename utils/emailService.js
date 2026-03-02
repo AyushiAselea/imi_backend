@@ -10,6 +10,10 @@ const transporter = nodemailer.createTransport({
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
+  // Force IPv4 — Render free tier blocks outbound IPv6 connections
+  socketOptions: { family: 4 },
+  greetingTimeout: 20000,
+  connectionTimeout: 20000,
 });
 
 /* ─── Verify connection on startup (non-blocking) ─────────── */
