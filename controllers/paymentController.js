@@ -3,7 +3,7 @@ const https = require("https");
 const querystring = require("querystring");
 const Product = require("../models/Product");
 const Order = require("../models/Order");
-const { sendOrderConfirmationEmail } = require("../utils/emailService");
+const { sendOrderConfirmationEmail, sendAdminOrderNotification } = require("../utils/emailService");
 
 /**
  * Generate PayU hash using SHA-512.
@@ -132,11 +132,14 @@ const createPayment = async (req, res) => {
                 .populate("user", "name email")
                 .populate("products.product", "name price image");
 
-            // Send order confirmation email (non-blocking) — req.user already has email/name
+            // Send order confirmation email + admin notification (non-blocking)
             if (req.user && req.user.email) {
                 sendOrderConfirmationEmail(req.user.email, req.user.name, populated)
                     .then(() => console.log(`📧 Order email sent to ${req.user.email}`))
                     .catch((err) => console.error("Order email failed:", err.message));
+                sendAdminOrderNotification(req.user.name, req.user.email, populated)
+                    .then(() => console.log(`📧 Admin notified: new order`))
+                    .catch((err) => console.error("Admin order notification failed:", err.message));
             }
 
             return res.status(201).json({
@@ -283,6 +286,9 @@ const paymentSuccess = async (req, res) => {
                 sendOrderConfirmationEmail(populated.user.email, populated.user.name, populated)
                     .then(() => console.log(`📧 Order email sent to ${populated.user.email}`))
                     .catch((err) => console.error("Order email failed:", err.message));
+                sendAdminOrderNotification(populated.user.name, populated.user.email, populated)
+                    .then(() => console.log(`📧 Admin notified: new order`))
+                    .catch((err) => console.error("Admin order notification failed:", err.message));
             }
         } catch (emailErr) {
             console.error("Order email lookup failed:", emailErr.message);

@@ -35,7 +35,7 @@ const settingsSchema = new mongoose.Schema(
             cartEmail: {
                 isEnabled:     { type: Boolean, default: true },
                 subject:       { type: String,  default: "🛒 {{productName}} is in your cart — complete your purchase!" },
-                customMessage: { type: String,  default: "Great choice! You just added **{{productName}}** to your cart. Don't wait — items sell out fast!" },
+                customMessage: { type: String,  default: "Hi {{FirstName}},\n\nWe noticed you added **IMI Glasses** to your cart but didn't complete your order.\n\nNo worries — it happens 😊\nYour smart upgrade is still waiting for you.\n\nWith IMI Glasses, you can:\n• Just say \"Hey IMI\" for hands-free control\n• Capture life as you see it\n• Stay connected effortlessly\n• Experience AI-powered smart vision\n\nYour cart is reserved for a limited time.\n\n👉 Complete your purchase here: {{CheckoutLink}}\n\nIf you had any questions, just reply to this email — we're happy to help.\n\nSee Smarter. Live Smarter.\nTeam IMI" },
             },
             orderEmail: {
                 isEnabled:     { type: Boolean, default: true },

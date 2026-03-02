@@ -44,70 +44,134 @@ const substituteVars = (tpl = "", vars = {}) =>
     vars[key] !== undefined ? vars[key] : `{{${key}}}`
   );
 
+/**
+ * Convert plain-text message with light markdown to styled HTML.
+ *   **bold**         → <strong>
+ *   Lines with • / - → bullet list
+ *   Blank lines      → spacer
+ *   Everything else  → <p>
+ */
+const textToHtml = (text = "") => {
+  const lines = text.split("\n");
+  const out = [];
+  let inList = false;
+
+  for (const raw of lines) {
+    const line = raw.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    const trimmed = line.trim();
+
+    if (/^[•\-]\s+/.test(trimmed)) {
+      if (!inList) {
+        out.push('<ul style="margin:8px 0 8px 16px;padding:0;list-style:none;">');
+        inList = true;
+      }
+      out.push(
+        `<li style="margin:4px 0;font-size:14px;color:#374151;line-height:1.6;"><span style="color:#0d9488;margin-right:6px;">•</span>${trimmed.replace(/^[•\-]\s+/, "")}</li>`
+      );
+    } else {
+      if (inList) { out.push("</ul>"); inList = false; }
+      if (trimmed === "") {
+        out.push('<div style="height:12px;"></div>');
+      } else {
+        out.push(`<p style="margin:0 0 4px;font-size:15px;color:#374151;line-height:1.6;">${trimmed}</p>`);
+      }
+    }
+  }
+  if (inList) out.push("</ul>");
+  return out.join("\n");
+};
+
+/* ─── Default templates ──────────────────────────────────── */
+const DEFAULT_CART_SUBJECT = "🛒 {{productName}} is in your cart — complete your purchase!";
+const DEFAULT_CART_MESSAGE = `Hi {{FirstName}},
+
+We noticed you added **IMI Glasses** to your cart but didn't complete your order.
+
+No worries — it happens 😊
+Your smart upgrade is still waiting for you.
+
+With IMI Glasses, you can:
+• Just say "Hey IMI" for hands-free control
+• Capture life as you see it
+• Stay connected effortlessly
+• Experience AI-powered smart vision
+
+Your cart is reserved for a limited time.
+
+👉 Complete your purchase here: {{CheckoutLink}}
+
+If you had any questions, just reply to this email — we're happy to help.
+
+See Smarter. Live Smarter.
+Team IMI`;
+
 /* ─── Cart email: item added ─────────────────────────────── */
 const sendCartEmail = async (userEmail, userName, item) => {
-  // ── Load admin-configured template (fall back to schema defaults) ──
-  let tplSubject  = "🛒 {{productName}} is in your cart — complete your purchase!";
-  let tplMessage  = "Great choice! You just added **{{productName}}** to your cart. Don't wait — items sell out fast!";
-  let isEnabled   = true;
+  // Load admin-configured template (fall back to defaults above)
+  let tplSubject = DEFAULT_CART_SUBJECT;
+  let tplMessage = DEFAULT_CART_MESSAGE;
+  let isEnabled  = true;
   try {
     const settings = await Settings.findOne().select("emailTemplates").lean();
     if (settings?.emailTemplates?.cartEmail) {
       const ct = settings.emailTemplates.cartEmail;
-      if (ct.isEnabled === false) { isEnabled = false; }
+      if (ct.isEnabled === false) isEnabled = false;
       if (ct.subject)       tplSubject = ct.subject;
       if (ct.customMessage) tplMessage = ct.customMessage;
     }
   } catch (e) {
-    console.error("📧 emailService: could not load settings, using defaults", e.message);
+    console.error("📧 could not load settings, using defaults", e.message);
   }
-  if (!isEnabled) return null;  // admin disabled this email type
+  if (!isEnabled) return null;
 
   const price    = Number(item.price).toLocaleString("en-IN");
   const subtotal = (item.price * item.quantity).toLocaleString("en-IN");
   const variant  = item.variant ? ` (${item.variant})` : "";
   const shopUrl  = process.env.FRONTEND_URL || "https://imiai.in";
 
-  const vars = {
+  // Variable maps — FirstName = first word of name, name = full name (backward compat)
+  const baseVars = {
     name:        userName || "there",
+    FirstName:   (userName || "there").split(" ")[0],
     productName: item.name,
-    variant:     variant,
+    variant,
     quantity:    String(item.quantity),
     price:       `₹${price}`,
     subtotal:    `₹${subtotal}`,
   };
-  const resolvedSubject = substituteVars(tplSubject, vars);
-  // Convert basic **bold** markdown to <strong> for the message
-  const resolvedMessage = substituteVars(tplMessage, vars)
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  // HTML version: CheckoutLink → styled <a> tag
+  const htmlVars = {
+    ...baseVars,
+    CheckoutLink: `<a href="${shopUrl}/cart" style="color:#0d9488;font-weight:700;text-decoration:underline;">Complete Your Purchase</a>`,
+  };
+  // Plain-text version: CheckoutLink → raw URL
+  const textVars = { ...baseVars, CheckoutLink: `${shopUrl}/cart` };
+
+  const resolvedSubject = substituteVars(tplSubject, baseVars);
+  const bodyHtml = textToHtml(substituteVars(tplMessage, htmlVars));
+  const bodyText = substituteVars(tplMessage, textVars);
 
   const html = `
 <!DOCTYPE html>
 <html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-</head>
+<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /></head>
 <body style="margin:0;padding:0;background:#f4f4f5;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   <table role="presentation" width="100%" style="background:#f4f4f5;padding:32px 16px;">
     <tr><td align="center">
       <table role="presentation" width="560" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);">
-        
+
         <!-- Header -->
         <tr><td style="background:linear-gradient(135deg,#0d9488,#0f766e);padding:28px 32px;text-align:center;">
-          <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;letter-spacing:-0.5px;">IMI Smart Glasses</h1>
+          <h1 style="margin:0;color:#fff;font-size:22px;font-weight:700;letter-spacing:-0.5px;">IMI Smart Glasses</h1>
           <p style="margin:6px 0 0;color:rgba(255,255,255,0.85);font-size:13px;">Your smart companion, always in sight</p>
         </td></tr>
 
-        <!-- Body -->
+        <!-- Body (admin-customisable message) -->
         <tr><td style="padding:32px;">
-          <p style="margin:0 0 6px;font-size:15px;color:#52525b;">Hi <strong style="color:#18181b;">${userName || "there"}</strong> 👋</p>
-          <p style="margin:0 0 24px;font-size:15px;color:#52525b;line-height:1.6;">
-            ${resolvedMessage}
-          </p>
+          ${bodyHtml}
 
           <!-- Product card -->
-          <table role="presentation" width="100%" style="background:#f9fafb;border:1px solid #e4e4e7;border-radius:12px;overflow:hidden;">
+          <table role="presentation" width="100%" style="margin-top:24px;background:#f9fafb;border:1px solid #e4e4e7;border-radius:12px;overflow:hidden;">
             <tr>
               ${item.image ? `<td width="100" style="padding:16px;vertical-align:top;">
                 <img src="${item.image}" alt="${item.name}" width="80" height="80" style="border-radius:10px;object-fit:cover;display:block;background:#e4e4e7;" />
@@ -121,18 +185,14 @@ const sendCartEmail = async (userEmail, userName, item) => {
             </tr>
           </table>
 
-          <!-- CTA button -->
+          <!-- CTA -->
           <table role="presentation" width="100%" style="margin-top:28px;">
             <tr><td align="center">
-              <a href="${shopUrl}/cart" style="display:inline-block;padding:14px 40px;background:#0d9488;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;border-radius:50px;letter-spacing:0.3px;">
+              <a href="${shopUrl}/cart" style="display:inline-block;padding:14px 40px;background:#0d9488;color:#fff;font-size:15px;font-weight:700;text-decoration:none;border-radius:50px;letter-spacing:0.3px;">
                 Complete Your Purchase →
               </a>
             </td></tr>
           </table>
-
-          <p style="margin:24px 0 0;font-size:13px;color:#a1a1aa;text-align:center;line-height:1.5;">
-            Your cart is saved and waiting. Items sell out fast — don't miss out!
-          </p>
         </td></tr>
 
         <!-- Footer -->
@@ -151,9 +211,7 @@ const sendCartEmail = async (userEmail, userName, item) => {
 </html>
   `.trim();
 
-  const text = `Hi ${vars.name}, you added ${item.name}${variant} (Qty: ${item.quantity}) to your cart. Subtotal: ₹${subtotal}. Complete your purchase at ${shopUrl}/cart`;
-
-  return sendMail({ to: userEmail, subject: resolvedSubject, html, text });
+  return sendMail({ to: userEmail, subject: resolvedSubject, html, text: bodyText });
 };
 
 const sendOrderConfirmationEmail = async (userEmail, userName, order) => {
@@ -267,4 +325,113 @@ const sendOrderConfirmationEmail = async (userEmail, userName, order) => {
   });
 };
 
-module.exports = { sendMail, sendCartEmail, sendOrderConfirmationEmail };
+/* ─── Admin notification: item added to cart ─────────────── */
+const sendAdminCartNotification = async (userName, userEmail, item) => {
+  const adminEmail = process.env.SMTP_USER; // imi@aseleanetworks.com
+  if (!adminEmail) return null;
+
+  const variant = item.variant ? ` (${item.variant})` : "";
+  const price = Number(item.price).toLocaleString("en-IN");
+  const subtotal = (item.price * item.quantity).toLocaleString("en-IN");
+
+  const html = `
+<!DOCTYPE html><html><head><meta charset="utf-8" /></head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" style="background:#f4f4f5;padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="520" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+        <tr><td style="background:#18181b;padding:20px 24px;text-align:center;">
+          <h2 style="margin:0;color:#fff;font-size:16px;">🛒 New Cart Activity</h2>
+        </td></tr>
+        <tr><td style="padding:24px;">
+          <p style="margin:0 0 12px;font-size:14px;color:#374151;">
+            <strong>${userName || "A user"}</strong> (<a href="mailto:${userEmail}" style="color:#0d9488;">${userEmail}</a>) added a product to their cart:
+          </p>
+          <table role="presentation" width="100%" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;">
+            <tr><td style="padding:12px;">
+              <p style="margin:0 0 4px;font-size:14px;font-weight:700;color:#111827;">${item.name}${variant}</p>
+              <p style="margin:0;font-size:13px;color:#6b7280;">Qty: ${item.quantity} &nbsp;|&nbsp; ₹${price} each &nbsp;|&nbsp; Subtotal: ₹${subtotal}</p>
+            </td></tr>
+          </table>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`.trim();
+
+  return sendMail({
+    to: adminEmail,
+    subject: `🛒 ${userName || "User"} added ${item.name} to cart`,
+    html,
+    text: `${userName || "User"} (${userEmail}) added ${item.name}${variant} (Qty: ${item.quantity}, ₹${price}) to their cart.`,
+  });
+};
+
+/* ─── Admin notification: new order placed ───────────────── */
+const sendAdminOrderNotification = async (userName, userEmail, order) => {
+  const adminEmail = process.env.SMTP_USER;
+  if (!adminEmail) return null;
+
+  const total = Number(order.totalAmount).toLocaleString("en-IN");
+  const method = order.paymentMethod || "ONLINE";
+  const methodLabel = method === "COD" ? "Cash on Delivery" : method === "PARTIAL" ? "50% Advance" : "Paid Online";
+  const orderId = String(order._id);
+
+  const productLines = (order.products || []).map((p) => {
+    const name = p.product?.name || p.productName || "Product";
+    const qty = p.quantity || 1;
+    return `${name} × ${qty}`;
+  }).join(", ");
+
+  const productsRowsHtml = (order.products || []).map((p) => {
+    const name = p.product?.name || p.productName || "Product";
+    const qty = p.quantity || 1;
+    return `<tr>
+      <td style="padding:6px 12px;font-size:13px;color:#111827;border-bottom:1px solid #e5e7eb;">${name}</td>
+      <td style="padding:6px 12px;font-size:13px;color:#6b7280;text-align:center;border-bottom:1px solid #e5e7eb;">${qty}</td>
+    </tr>`;
+  }).join("");
+
+  const html = `
+<!DOCTYPE html><html><head><meta charset="utf-8" /></head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" style="background:#f4f4f5;padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="520" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+        <tr><td style="background:#065f46;padding:20px 24px;text-align:center;">
+          <h2 style="margin:0;color:#fff;font-size:16px;">💰 New Order Received</h2>
+        </td></tr>
+        <tr><td style="padding:24px;">
+          <p style="margin:0 0 16px;font-size:14px;color:#374151;">
+            <strong>${userName || "A customer"}</strong> (<a href="mailto:${userEmail}" style="color:#0d9488;">${userEmail}</a>) just placed an order.
+          </p>
+          <table role="presentation" width="100%" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;border-collapse:collapse;">
+            <tr style="background:#f9fafb;">
+              <th style="padding:8px 12px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase;">Product</th>
+              <th style="padding:8px 12px;text-align:center;font-size:11px;color:#6b7280;text-transform:uppercase;">Qty</th>
+            </tr>
+            ${productsRowsHtml}
+          </table>
+          <table role="presentation" width="100%" style="margin-top:12px;">
+            <tr><td style="font-size:13px;color:#6b7280;padding:4px 0;">Order ID</td>
+                <td style="font-size:13px;color:#111827;font-weight:600;text-align:right;padding:4px 0;">${orderId}</td></tr>
+            <tr><td style="font-size:13px;color:#6b7280;padding:4px 0;">Payment</td>
+                <td style="font-size:13px;color:#111827;font-weight:600;text-align:right;padding:4px 0;">${methodLabel}</td></tr>
+            <tr><td style="font-size:14px;font-weight:700;color:#111827;padding:8px 0 0;">Total</td>
+                <td style="font-size:16px;font-weight:700;color:#0d9488;text-align:right;padding:8px 0 0;">₹${total}</td></tr>
+          </table>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`.trim();
+
+  return sendMail({
+    to: adminEmail,
+    subject: `💰 New Order #${orderId.slice(-6)} — ₹${total} (${methodLabel})`,
+    html,
+    text: `New order from ${userName || "customer"} (${userEmail}). Order #${orderId}, ₹${total}, ${methodLabel}. Products: ${productLines}`,
+  });
+};
+
+module.exports = { sendMail, sendCartEmail, sendOrderConfirmationEmail, sendAdminCartNotification, sendAdminOrderNotification };
