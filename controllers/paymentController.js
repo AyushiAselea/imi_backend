@@ -42,6 +42,7 @@ const createPayment = async (req, res) => {
             price: inlinePrice,
             paymentMethod = "ONLINE",     // "ONLINE" | "COD" | "PARTIAL"
             shippingAddress,
+            variant = "",                 // e.g. "black / black" (frameColor / glassType)
         } = req.body;
 
         // ── Validate shipping address ────────────────────────
@@ -101,8 +102,8 @@ const createPayment = async (req, res) => {
         }
 
         const orderProducts = productDbId
-            ? [{ product: productDbId, quantity }]
-            : [{ productName: productinfo, quantity, price: totalAmount / quantity }];
+            ? [{ product: productDbId, quantity, variant }]
+            : [{ productName: productinfo, quantity, price: totalAmount / quantity, variant }];
 
         // ── COD: create order immediately (no PayU) ──────────
         if (paymentMethod === "COD") {

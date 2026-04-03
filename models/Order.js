@@ -43,6 +43,10 @@ const orderSchema = new mongoose.Schema(
                     min: [1, "Quantity must be at least 1"],
                     default: 1,
                 },
+                variant: {
+                    type: String,
+                    default: "",       // e.g. "black / black" (frameColor / glassType)
+                },
             },
         ],
         totalAmount: {
