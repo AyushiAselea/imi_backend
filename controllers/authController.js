@@ -143,4 +143,21 @@ const syncSocialUser = async (req, res) => {
     }
 };
 
-module.exports = { registerUser, loginUser, logoutUser, getMe, syncSocialUser };
+/**
+ * @desc    Check if an email address is already registered
+ * @route   POST /api/auth/check-email
+ * @access  Public
+ */
+const checkEmail = async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email) return res.status(400).json({ message: "Email is required" });
+        const user = await User.findOne({ email: email.toLowerCase().trim() }).select("_id");
+        res.json({ exists: !!user });
+    } catch (error) {
+        console.error("Check email error:", error.message);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+module.exports = { registerUser, loginUser, logoutUser, getMe, syncSocialUser, checkEmail };

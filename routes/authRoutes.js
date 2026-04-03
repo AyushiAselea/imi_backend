@@ -6,6 +6,7 @@ const {
     logoutUser,
     getMe,
     syncSocialUser,
+    checkEmail,
 } = require("../controllers/authController");
 const { protect } = require("../middleware/authMiddleware");
 
@@ -13,6 +14,7 @@ const { protect } = require("../middleware/authMiddleware");
 router.post("/register", registerUser);
 router.post("/login", loginUser);
 router.post("/sync", syncSocialUser);
+router.post("/check-email", checkEmail);
 
 // Protected routes
 router.post("/logout", protect, logoutUser);

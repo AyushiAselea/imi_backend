@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { protect } = require("../middleware/authMiddleware");
+const { protect, optionalProtect } = require("../middleware/authMiddleware");
 const {
     createPayment,
     paymentSuccess,
@@ -9,8 +9,8 @@ const {
 } = require("../controllers/paymentController");
 
 // @route   POST /api/payment/create
-// @desc    Initiate PayU payment — returns form data for hosted checkout (requires auth)
-router.post("/create", protect, createPayment);
+// @desc    Initiate payment — works for both logged-in users and guests
+router.post("/create", optionalProtect, createPayment);
 
 // @route   POST /api/payment/success
 // @desc    PayU success callback (public — called by PayU server after payment)

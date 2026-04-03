@@ -52,6 +52,21 @@ const createPayment = async (req, res) => {
             return res.status(400).json({ message: "Complete shipping address is required" });
         }
 
+        // For guests, email is required in the shipping address
+        const isGuest = !req.user;
+        if (isGuest && !shippingAddress.email) {
+            return res.status(400).json({ message: "Email address is required for checkout" });
+        }
+
+        // ── Resolve identity (logged-in or guest) ────────────
+        const userId    = req.user ? req.user._id : null;
+        const firstname = req.user ? req.user.name  : shippingAddress.fullName;
+        const email     = req.user ? req.user.email : shippingAddress.email;
+        const phone     = (req.user && req.user.phone) ? req.user.phone : shippingAddress.phone;
+        const guestInfo = isGuest
+            ? { name: shippingAddress.fullName, email: shippingAddress.email, phone: shippingAddress.phone }
+            : null;
+
         // ── Resolve product info ─────────────────────────────
         let productDbId = null;
         let productinfo;
@@ -81,13 +96,11 @@ const createPayment = async (req, res) => {
         let advanceAmount = 0;
         let remainingAmount = 0;
         let chargeAmount = totalAmount; // amount to charge via PayU
-        let paymentStatus = "Pending";
         let deliveryPaymentPending = false;
 
         if (paymentMethod === "COD") {
             chargeAmount = 0; // no online payment
             remainingAmount = totalAmount;
-            paymentStatus = "Pending";
             deliveryPaymentPending = true;
         } else if (paymentMethod === "PARTIAL") {
             advanceAmount = parseFloat((totalAmount * 0.5).toFixed(2));
@@ -108,7 +121,8 @@ const createPayment = async (req, res) => {
         // ── COD: create order immediately (no PayU) ──────────
         if (paymentMethod === "COD") {
             const order = await Order.create({
-                user: req.user._id,
+                user: userId,
+                guestInfo,
                 products: orderProducts,
                 totalAmount,
                 advanceAmount: 0,
@@ -134,11 +148,11 @@ const createPayment = async (req, res) => {
                 .populate("products.product", "name price image");
 
             // Send order confirmation email + admin notification (non-blocking)
-            if (req.user && req.user.email) {
-                sendOrderConfirmationEmail(req.user.email, req.user.name, populated)
-                    .then(() => console.log(`📧 Order email sent to ${req.user.email}`))
+            if (email) {
+                sendOrderConfirmationEmail(email, firstname, populated)
+                    .then(() => console.log(`📧 Order email sent to ${email}`))
                     .catch((err) => console.error("Order email failed:", err.message));
-                sendAdminOrderNotification(req.user.name, req.user.email, populated)
+                sendAdminOrderNotification(firstname, email, populated)
                     .then(() => console.log(`📧 Admin notified: new order`))
                     .catch((err) => console.error("Admin order notification failed:", err.message));
             }
@@ -152,10 +166,11 @@ const createPayment = async (req, res) => {
         }
 
         // ── ONLINE or PARTIAL: initiate PayU payment ─────────
+        if (!email) {
+            return res.status(400).json({ message: "Email address is required for online payment" });
+        }
+
         const txnid = `TXN_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
-        const firstname = req.user.name;
-        const email = req.user.email;
-        const phone = req.user.phone || shippingAddress.phone || "";
 
         const key = process.env.PAYU_MERCHANT_KEY;
         const salt = process.env.PAYU_MERCHANT_SALT;
@@ -174,7 +189,8 @@ const createPayment = async (req, res) => {
 
         // Create pending order
         const order = await Order.create({
-            user: req.user._id,
+            user: userId,
+            guestInfo,
             products: orderProducts,
             totalAmount,
             advanceAmount: paymentMethod === "PARTIAL" ? advanceAmount : totalAmount,

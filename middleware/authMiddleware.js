@@ -48,4 +48,24 @@ const admin = (req, res, next) => {
     }
 };
 
-module.exports = { protect, admin };
+/**
+ * Optional auth — attaches req.user if a valid JWT is present, but does NOT block
+ * unauthenticated requests. Use for guest-friendly endpoints.
+ */
+const optionalProtect = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+        try {
+            const token = authHeader.split(" ")[1];
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            req.user = await User.findById(decoded.id).select("-password") || null;
+        } catch {
+            req.user = null; // invalid token — treat as guest
+        }
+    } else {
+        req.user = null;
+    }
+    next();
+};
+
+module.exports = { protect, admin, optionalProtect };
