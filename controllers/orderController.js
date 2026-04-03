@@ -70,7 +70,12 @@ const createOrder = async (req, res) => {
  */
 const getMyOrders = async (req, res) => {
     try {
-        const orders = await Order.find({ user: req.user._id })
+        const orders = await Order.find({
+            $or: [
+                { user: req.user._id },
+                { user: null, "guestInfo.email": req.user.email.toLowerCase().trim() },
+            ],
+        })
             .populate("products.product", "name price image")
             .sort({ createdAt: -1 });
 

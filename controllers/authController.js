@@ -1,5 +1,5 @@
 const crypto = require("crypto");
-
+const Order = require("../models/Order");
 const User = require("../models/User");
 const generateToken = require("../utils/generateToken");
 
@@ -129,6 +129,12 @@ const syncSocialUser = async (req, res) => {
         }
 
         const token = generateToken(user._id);
+
+        // Link any guest orders placed with this email to this account
+        await Order.updateMany(
+            { user: null, "guestInfo.email": email.toLowerCase().trim() },
+            { $set: { user: user._id } }
+        ).catch(() => {}); // non-blocking — don't fail auth if this errors
 
         res.json({
             _id: user._id,
