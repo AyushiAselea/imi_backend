@@ -33,6 +33,10 @@ app.options("*", cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// ─── STATIC FILES ────────────────────────────────────────────
+// Serve product variant images from /variants/* (e.g. /variants/mark1/mark1_black_black_v1.png)
+app.use("/variants", express.static("public/variants"));
+
 // ─── ROUTES ──────────────────────────────────────────────────
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
