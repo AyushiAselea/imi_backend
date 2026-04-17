@@ -240,7 +240,7 @@ const sendOrderConfirmationEmail = async (userEmail, userName, order) => {
   }
   if (!isEnabled) return null;
 
-  const shopUrl = process.env.FRONTEND_URL || "https://imiai.in";
+  const shopUrl = process.env.FRONTEND_URL || "https://imiglasses.com";
   const total   = Number(order.totalAmount).toLocaleString("en-IN");
   const method  = order.paymentMethod || "ONLINE";
   const orderId = String(order._id);

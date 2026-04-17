@@ -1,5 +1,6 @@
 const Order = require("../models/Order");
 const Product = require("../models/Product");
+const { sendOrderConfirmationEmail, sendAdminOrderNotification } = require("../utils/emailService");
 
 /**
  * @desc    Create a new order (purchase products)
@@ -55,6 +56,26 @@ const createOrder = async (req, res) => {
         const populatedOrder = await Order.findById(order._id)
             .populate("user", "name email")
             .populate("products.product", "name price image");
+
+        // ── Send confirmation emails (non-blocking) ──────────
+        const customerEmail = populatedOrder.user?.email;
+        const customerName  = populatedOrder.user?.name;
+
+        console.log("📧 Attempting to send order confirmation email to:", customerEmail);
+
+        if (customerEmail && typeof customerEmail === "string" && customerEmail.includes("@")) {
+            // Customer email
+            sendOrderConfirmationEmail(customerEmail, customerName, populatedOrder)
+                .then(() => console.log(`📧 Order confirmation sent to customer: ${customerEmail}`))
+                .catch((err) => console.error(`📧 Customer email failed for ${customerEmail}:`, err.message));
+
+            // Admin notification
+            sendAdminOrderNotification(customerName, customerEmail, populatedOrder)
+                .then(() => console.log("📧 Admin notified of new order"))
+                .catch((err) => console.error("📧 Admin order notification failed:", err.message));
+        } else {
+            console.error("📧 Skipping customer email — invalid or missing email:", customerEmail);
+        }
 
         res.status(201).json(populatedOrder);
     } catch (error) {
