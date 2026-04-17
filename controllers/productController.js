@@ -91,7 +91,7 @@ const getProductById = async (req, res) => {
  */
 const createProduct = async (req, res) => {
     try {
-        const { name, description, price, image, images, stock, category, status } = req.body;
+        const { name, description, price, image, images, stock, category, status, variants } = req.body;
 
         if (!name || !description || price === undefined) {
             return res.status(400).json({ message: "Name, description, and price are required" });
@@ -106,6 +106,7 @@ const createProduct = async (req, res) => {
             stock,
             category,
             status,
+            variants: variants || [],
         });
 
         res.status(201).json(product);
@@ -127,7 +128,7 @@ const updateProduct = async (req, res) => {
             return res.status(404).json({ message: "Product not found" });
         }
 
-        const fields = ["name", "description", "price", "image", "images", "stock", "category", "status"];
+        const fields = ["name", "description", "price", "image", "images", "stock", "category", "status", "variants"];
         fields.forEach((f) => {
             if (req.body[f] !== undefined) product[f] = req.body[f];
         });

@@ -59,7 +59,7 @@ const getProducts = async (req, res) => {
  */
 const createProduct = async (req, res) => {
     try {
-        const { name, description, price, image, stock, category, status } = req.body;
+        const { name, description, price, image, stock, category, status, variants } = req.body;
         const product = await Product.create({
             name,
             description,
@@ -68,6 +68,7 @@ const createProduct = async (req, res) => {
             stock,
             category,
             status,
+            variants: variants || [],
         });
         res.status(201).json(product);
     } catch (error) {
@@ -87,7 +88,7 @@ const updateProduct = async (req, res) => {
             return res.status(404).json({ message: "Product not found" });
         }
 
-        const fields = ["name", "description", "price", "image", "stock", "category", "status"];
+        const fields = ["name", "description", "price", "image", "stock", "category", "status", "variants"];
         fields.forEach((f) => {
             if (req.body[f] !== undefined) product[f] = req.body[f];
         });
@@ -383,6 +384,126 @@ const getTrackingSettings = async (req, res) => {
     }
 };
 
+// ─── VARIANT MANAGEMENT ─────────────────────────────────────
+
+/**
+ * @desc    Get all variants of a product
+ * @route   GET /api/admin/products/:id/variants
+ */
+const getProductVariants = async (req, res) => {
+    try {
+        const product = await Product.findById(req.params.id).select("name variants");
+        if (!product) {
+            return res.status(404).json({ message: "Product not found" });
+        }
+        res.json({ productName: product.name, variants: product.variants });
+    } catch (error) {
+        if (error.kind === "ObjectId") {
+            return res.status(404).json({ message: "Product not found" });
+        }
+        console.error("Get variants error:", error.message);
+        res.status(500).json({ message: "Server error fetching variants" });
+    }
+};
+
+/**
+ * @desc    Add a variant to a product
+ * @route   POST /api/admin/products/:id/variants
+ */
+const addVariant = async (req, res) => {
+    try {
+        const product = await Product.findById(req.params.id);
+        if (!product) {
+            return res.status(404).json({ message: "Product not found" });
+        }
+
+        const { variantName, color, colorHex, frameType, price, stock, image } = req.body;
+
+        if (!variantName || price === undefined) {
+            return res.status(400).json({ message: "variantName and price are required" });
+        }
+
+        product.variants.push({
+            variantName,
+            color: color || "",
+            colorHex: colorHex || "#000000",
+            frameType: frameType || "",
+            price,
+            stock: stock || 0,
+            image: image || "",
+        });
+
+        const updated = await product.save();
+        res.status(201).json(updated);
+    } catch (error) {
+        if (error.kind === "ObjectId") {
+            return res.status(404).json({ message: "Product not found" });
+        }
+        console.error("Add variant error:", error.message);
+        res.status(500).json({ message: "Server error adding variant" });
+    }
+};
+
+/**
+ * @desc    Update a specific variant
+ * @route   PUT /api/admin/products/:id/variants/:variantId
+ */
+const updateVariant = async (req, res) => {
+    try {
+        const product = await Product.findById(req.params.id);
+        if (!product) {
+            return res.status(404).json({ message: "Product not found" });
+        }
+
+        const variant = product.variants.id(req.params.variantId);
+        if (!variant) {
+            return res.status(404).json({ message: "Variant not found" });
+        }
+
+        const fields = ["variantName", "color", "colorHex", "frameType", "price", "stock", "image"];
+        fields.forEach((f) => {
+            if (req.body[f] !== undefined) variant[f] = req.body[f];
+        });
+
+        const updated = await product.save();
+        res.json(updated);
+    } catch (error) {
+        if (error.kind === "ObjectId") {
+            return res.status(404).json({ message: "Product or variant not found" });
+        }
+        console.error("Update variant error:", error.message);
+        res.status(500).json({ message: "Server error updating variant" });
+    }
+};
+
+/**
+ * @desc    Delete a specific variant (by variant _id, NOT product _id)
+ * @route   DELETE /api/admin/products/:id/variants/:variantId
+ */
+const deleteVariant = async (req, res) => {
+    try {
+        const product = await Product.findById(req.params.id);
+        if (!product) {
+            return res.status(404).json({ message: "Product not found" });
+        }
+
+        const variant = product.variants.id(req.params.variantId);
+        if (!variant) {
+            return res.status(404).json({ message: "Variant not found" });
+        }
+
+        variant.deleteOne();
+        const updated = await product.save();
+        res.json(updated);
+    } catch (error) {
+        if (error.kind === "ObjectId") {
+            return res.status(404).json({ message: "Product or variant not found" });
+        }
+        console.error("Delete variant error:", error.message);
+        res.status(500).json({ message: "Server error deleting variant" });
+    }
+};
+
 module.exports = {
     getDashboardStats,
     getProducts,
@@ -399,4 +520,8 @@ module.exports = {
     getUsersWithFailedPayments,
     getAbandonedCartUsers,
     getTrackingSettings,
+    getProductVariants,
+    addVariant,
+    updateVariant,
+    deleteVariant,
 };

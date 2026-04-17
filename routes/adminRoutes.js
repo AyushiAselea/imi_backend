@@ -17,6 +17,10 @@ const {
     getUsersWithFailedPayments,
     getAbandonedCartUsers,
     getTrackingSettings,
+    getProductVariants,
+    addVariant,
+    updateVariant,
+    deleteVariant,
 } = require("../controllers/adminController");
 const {
     getAbandonedCarts,
@@ -38,6 +42,12 @@ router.get("/products", getProducts);
 router.post("/products", createProduct);
 router.put("/products/:id", updateProduct);
 router.delete("/products/:id", deleteProduct);
+
+// Variant CRUD (per product)
+router.get("/products/:id/variants", getProductVariants);
+router.post("/products/:id/variants", addVariant);
+router.put("/products/:id/variants/:variantId", updateVariant);
+router.delete("/products/:id/variants/:variantId", deleteVariant);
 
 // Orders
 router.get("/orders", getOrders);
