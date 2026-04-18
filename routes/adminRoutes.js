@@ -9,6 +9,7 @@ const {
     deleteProduct,
     getOrders,
     updateOrder,
+    deleteOrder,
     getUsers,
     getSettings,
     updateSettings,
@@ -52,6 +53,7 @@ router.delete("/products/:id/variants/:variantId", deleteVariant);
 // Orders
 router.get("/orders", getOrders);
 router.put("/orders/:id", updateOrder);
+router.delete("/orders/:id", deleteOrder);
 
 // Users (read-only)
 router.get("/users", getUsers);

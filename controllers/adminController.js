@@ -145,7 +145,7 @@ const getOrders = async (req, res) => {
 };
 
 /**
- * @desc    Update order status
+ * @desc    Update order (status, paymentStatus, totalAmount, shippingAddress, notes)
  * @route   PUT /api/admin/orders/:id
  */
 const updateOrder = async (req, res) => {
@@ -155,8 +155,13 @@ const updateOrder = async (req, res) => {
             return res.status(404).json({ message: "Order not found" });
         }
 
-        if (req.body.status) order.status = req.body.status;
-        if (req.body.paymentStatus) order.paymentStatus = req.body.paymentStatus;
+        const { status, paymentStatus, totalAmount, shippingAddress, paymentId, notes } = req.body;
+        if (status) order.status = status;
+        if (paymentStatus) order.paymentStatus = paymentStatus;
+        if (totalAmount !== undefined && !isNaN(Number(totalAmount))) order.totalAmount = Number(totalAmount);
+        if (shippingAddress) order.shippingAddress = { ...order.shippingAddress, ...shippingAddress };
+        if (paymentId !== undefined) order.paymentId = paymentId;
+        if (notes !== undefined) order.notes = notes;
 
         const updated = await order.save();
         const populated = await Order.findById(updated._id)
@@ -170,6 +175,27 @@ const updateOrder = async (req, res) => {
         }
         console.error("Admin update order error:", error.message);
         res.status(500).json({ message: "Server error updating order" });
+    }
+};
+
+/**
+ * @desc    Delete an order
+ * @route   DELETE /api/admin/orders/:id
+ */
+const deleteOrder = async (req, res) => {
+    try {
+        const order = await Order.findById(req.params.id);
+        if (!order) {
+            return res.status(404).json({ message: "Order not found" });
+        }
+        await order.deleteOne();
+        res.json({ message: "Order deleted" });
+    } catch (error) {
+        if (error.kind === "ObjectId") {
+            return res.status(404).json({ message: "Order not found" });
+        }
+        console.error("Admin delete order error:", error.message);
+        res.status(500).json({ message: "Server error deleting order" });
     }
 };
 
@@ -512,6 +538,7 @@ module.exports = {
     deleteProduct,
     getOrders,
     updateOrder,
+    deleteOrder,
     getUsers,
     getSettings,
     updateSettings,
