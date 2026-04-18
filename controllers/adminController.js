@@ -13,7 +13,7 @@ const AbandonedCart = require("../models/AbandonedCart");
  */
 const getDashboardStats = async (req, res) => {
     try {
-        const [totalProducts, activeProducts, totalOrders, totalUsers, revenueAgg, abandonedCarts, failedOrders] =
+        const [totalProducts, activeProducts, totalOrders, totalUsers, revenueAgg, abandonedCarts, failedOrders, codCollected, codPending] =
             await Promise.all([
                 Product.countDocuments(),
                 Product.countDocuments({ status: "active" }),
@@ -25,12 +25,14 @@ const getDashboardStats = async (req, res) => {
                 ]),
                 AbandonedCart.countDocuments({ isAbandoned: true, isRecovered: false }),
                 Order.countDocuments({ paymentStatus: "Failed" }),
+                Order.countDocuments({ paymentMethod: { $in: ["COD", "PARTIAL"] }, paymentStatus: "Collected" }),
+                Order.countDocuments({ paymentMethod: { $in: ["COD", "PARTIAL"] }, paymentStatus: { $nin: ["Collected", "Failed"] } }),
             ]);
 
         const revenue =
             revenueAgg.length > 0 ? revenueAgg[0].total : 0;
 
-        res.json({ totalProducts, activeProducts, totalOrders, totalUsers, revenue, abandonedCarts, failedOrders });
+        res.json({ totalProducts, activeProducts, totalOrders, totalUsers, revenue, abandonedCarts, failedOrders, codCollected, codPending });
     } catch (error) {
         console.error("Dashboard stats error:", error.message);
         res.status(500).json({ message: "Server error fetching stats" });
