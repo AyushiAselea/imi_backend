@@ -108,9 +108,11 @@ const createPayment = async (req, res) => {
             chargeAmount = advanceAmount;
             deliveryPaymentPending = true;
         } else {
-            // ONLINE — full payment
+            // ONLINE — full payment with 5% discount
+            totalAmount = parseFloat((totalAmount * 0.95).toFixed(2));
             advanceAmount = totalAmount;
             remainingAmount = 0;
+            chargeAmount = totalAmount;
             deliveryPaymentPending = false;
         }
 
