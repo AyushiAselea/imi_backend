@@ -333,9 +333,138 @@ const sendOrderConfirmationEmail = async (userEmail, userName, order) => {
   });
 };
 
+/* ─── Order status updates (customer + admin) ────────────── */
+const ADMIN_STATUS_EMAIL = process.env.ADMIN_ORDER_EMAIL || "tanay@aseleanetwork.com";
+const VALID_ORDER_STATUSES = new Set(["Pending", "Processing", "Shipped", "Delivered", "Cancelled"]);
+
+const toSafeEmail = (value = "") => {
+  const email = String(value || "").trim();
+  return email.includes("@") ? email : "";
+};
+
+const sendOrderStatusUpdateEmail = async (userEmail, userName, order, oldStatus, newStatus) => {
+  const to = toSafeEmail(userEmail);
+  if (!to || !VALID_ORDER_STATUSES.has(newStatus)) return null;
+
+  const shopUrl = process.env.FRONTEND_URL || "https://imiglasses.com";
+  const total = Number(order.totalAmount || 0).toLocaleString("en-IN");
+  const orderId = String(order._id || "");
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /></head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" style="background:#f4f4f5;padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="560" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);">
+        <tr><td style="background:linear-gradient(135deg,#0d9488,#0f766e);padding:28px 32px;text-align:center;">
+          <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;">Order Status Updated</h1>
+          <p style="margin:6px 0 0;color:rgba(255,255,255,0.9);font-size:13px;">IMI Smart Glasses</p>
+        </td></tr>
+        <tr><td style="padding:32px;">
+          <p style="margin:0 0 14px;font-size:15px;color:#52525b;">Hi <strong style="color:#18181b;">${userName || "there"}</strong>,</p>
+          <p style="margin:0 0 18px;font-size:15px;color:#52525b;line-height:1.6;">
+            Your order status has changed from <strong>${oldStatus}</strong> to <strong>${newStatus}</strong>.
+          </p>
+          <table role="presentation" width="100%" style="border:1px solid #e4e4e7;border-radius:10px;overflow:hidden;border-collapse:collapse;">
+            <tr>
+              <td style="padding:10px 12px;font-size:13px;color:#71717a;">Order ID</td>
+              <td style="padding:10px 12px;font-size:13px;color:#18181b;text-align:right;font-weight:600;">${orderId}</td>
+            </tr>
+            <tr style="background:#fafafa;">
+              <td style="padding:10px 12px;font-size:13px;color:#71717a;">Current Status</td>
+              <td style="padding:10px 12px;font-size:13px;color:#18181b;text-align:right;font-weight:600;">${newStatus}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 12px;font-size:13px;color:#71717a;">Order Total</td>
+              <td style="padding:10px 12px;font-size:13px;color:#0d9488;text-align:right;font-weight:700;">₹${total}</td>
+            </tr>
+          </table>
+          <table role="presentation" width="100%" style="margin-top:24px;"><tr><td align="center">
+            <a href="${shopUrl}/profile" style="display:inline-block;padding:14px 36px;background:#0d9488;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;border-radius:50px;">
+              View Order →
+            </a>
+          </td></tr></table>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
+  `.trim();
+
+  return sendMail({
+    to,
+    subject: `📦 Order #${orderId.slice(-6)} status: ${newStatus}`,
+    html,
+    text: `Hi ${userName || "there"}, your order (${orderId}) status changed from ${oldStatus} to ${newStatus}. Total: ₹${total}. Track: ${shopUrl}/profile`,
+  });
+};
+
+const sendAdminOrderStatusUpdateNotification = async (userName, userEmail, order, oldStatus, newStatus) => {
+  const to = toSafeEmail(ADMIN_STATUS_EMAIL) || toSafeEmail(process.env.SMTP_USER);
+  if (!to || !VALID_ORDER_STATUSES.has(newStatus)) return null;
+
+  const orderId = String(order._id || "");
+  const total = Number(order.totalAmount || 0).toLocaleString("en-IN");
+
+  const html = `
+<!DOCTYPE html><html><head><meta charset="utf-8" /></head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" style="background:#f4f4f5;padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="520" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+        <tr><td style="background:#1d4ed8;padding:20px 24px;text-align:center;">
+          <h2 style="margin:0;color:#fff;font-size:16px;">📦 Order Status Changed</h2>
+        </td></tr>
+        <tr><td style="padding:24px;">
+          <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.6;">
+            Order status updated by admin.
+          </p>
+          <table role="presentation" width="100%" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;border-collapse:collapse;">
+            <tr>
+              <td style="padding:8px 12px;font-size:13px;color:#6b7280;">Order ID</td>
+              <td style="padding:8px 12px;font-size:13px;color:#111827;text-align:right;font-weight:600;">${orderId}</td>
+            </tr>
+            <tr style="background:#f9fafb;">
+              <td style="padding:8px 12px;font-size:13px;color:#6b7280;">Customer</td>
+              <td style="padding:8px 12px;font-size:13px;color:#111827;text-align:right;font-weight:600;">${userName || "Customer"}</td>
+            </tr>
+            <tr>
+              <td style="padding:8px 12px;font-size:13px;color:#6b7280;">Email</td>
+              <td style="padding:8px 12px;font-size:13px;color:#111827;text-align:right;font-weight:600;">${userEmail || "N/A"}</td>
+            </tr>
+            <tr style="background:#f9fafb;">
+              <td style="padding:8px 12px;font-size:13px;color:#6b7280;">From</td>
+              <td style="padding:8px 12px;font-size:13px;color:#111827;text-align:right;font-weight:600;">${oldStatus}</td>
+            </tr>
+            <tr>
+              <td style="padding:8px 12px;font-size:13px;color:#6b7280;">To</td>
+              <td style="padding:8px 12px;font-size:13px;color:#0d9488;text-align:right;font-weight:700;">${newStatus}</td>
+            </tr>
+            <tr style="background:#f9fafb;">
+              <td style="padding:8px 12px;font-size:13px;color:#6b7280;">Total</td>
+              <td style="padding:8px 12px;font-size:13px;color:#111827;text-align:right;font-weight:700;">₹${total}</td>
+            </tr>
+          </table>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`.trim();
+
+  return sendMail({
+    to,
+    subject: `📦 Status Update: #${orderId.slice(-6)} ${oldStatus} → ${newStatus}`,
+    html,
+    text: `Order ${orderId} moved from ${oldStatus} to ${newStatus}. Customer: ${userName || "Customer"} (${userEmail || "N/A"}). Total: ₹${total}.`,
+  });
+};
+
 /* ─── Admin notification: item added to cart ─────────────── */
 const sendAdminCartNotification = async (userName, userEmail, item) => {
-  const adminEmail = process.env.SMTP_USER; // imi@aseleanetworks.com
+  const adminEmail = toSafeEmail(ADMIN_STATUS_EMAIL) || toSafeEmail(process.env.SMTP_USER);
   if (!adminEmail) return null;
 
   const variant = item.variant ? ` (${item.variant})` : "";
@@ -377,7 +506,7 @@ const sendAdminCartNotification = async (userName, userEmail, item) => {
 
 /* ─── Admin notification: new order placed ───────────────── */
 const sendAdminOrderNotification = async (userName, userEmail, order) => {
-  const adminEmail = process.env.SMTP_USER;
+  const adminEmail = toSafeEmail(ADMIN_STATUS_EMAIL) || toSafeEmail(process.env.SMTP_USER);
   if (!adminEmail) return null;
 
   const total = Number(order.totalAmount).toLocaleString("en-IN");
@@ -442,4 +571,12 @@ const sendAdminOrderNotification = async (userName, userEmail, order) => {
   });
 };
 
-module.exports = { sendMail, sendCartEmail, sendOrderConfirmationEmail, sendAdminCartNotification, sendAdminOrderNotification };
+module.exports = {
+  sendMail,
+  sendCartEmail,
+  sendOrderConfirmationEmail,
+  sendAdminCartNotification,
+  sendAdminOrderNotification,
+  sendOrderStatusUpdateEmail,
+  sendAdminOrderStatusUpdateNotification,
+};

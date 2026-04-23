@@ -3,6 +3,27 @@ const Order = require("../models/Order");
 const User = require("../models/User");
 const Settings = require("../models/Settings");
 const AbandonedCart = require("../models/AbandonedCart");
+const {
+    sendOrderStatusUpdateEmail,
+    sendAdminOrderStatusUpdateNotification,
+} = require("../utils/emailService");
+
+const ORDER_STATUSES = new Set(["Pending", "Processing", "Shipped", "Delivered", "Cancelled"]);
+
+const normalizeOrderStatus = (value) => {
+    if (typeof value !== "string") return null;
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return null;
+    const map = {
+        pending: "Pending",
+        processing: "Processing",
+        shipped: "Shipped",
+        delivered: "Delivered",
+        cancelled: "Cancelled",
+        canceled: "Cancelled",
+    };
+    return map[normalized] || null;
+};
 
 // ─── DASHBOARD ───────────────────────────────────────────────
 
@@ -157,8 +178,19 @@ const updateOrder = async (req, res) => {
             return res.status(404).json({ message: "Order not found" });
         }
 
+        const previousStatus = order.status;
         const { status, paymentStatus, totalAmount, shippingAddress, paymentId, notes } = req.body;
-        if (status) order.status = status;
+        let nextStatus = null;
+        if (status !== undefined) {
+            const normalizedStatus = normalizeOrderStatus(status);
+            if (!normalizedStatus) {
+                return res.status(400).json({
+                    message: "Invalid status. Allowed values: Pending, Processing, Shipped, Delivered, Cancelled",
+                });
+            }
+            nextStatus = normalizedStatus;
+            order.status = normalizedStatus;
+        }
         if (paymentStatus) order.paymentStatus = paymentStatus;
         if (totalAmount !== undefined && !isNaN(Number(totalAmount))) order.totalAmount = Number(totalAmount);
         if (shippingAddress) order.shippingAddress = { ...order.shippingAddress, ...shippingAddress };
@@ -169,6 +201,34 @@ const updateOrder = async (req, res) => {
         const populated = await Order.findById(updated._id)
             .populate("user", "name email")
             .populate("products.product", "name price image");
+
+        // Send status update emails to customer and admin when status actually changes.
+        if (nextStatus && nextStatus !== previousStatus && ORDER_STATUSES.has(nextStatus)) {
+            const customerEmail = populated.user?.email || populated.guestInfo?.email;
+            const customerName = populated.user?.name || populated.guestInfo?.name || "Customer";
+            const validCustomerEmail =
+                typeof customerEmail === "string" && customerEmail.includes("@") ? customerEmail : "";
+
+            if (validCustomerEmail) {
+                sendOrderStatusUpdateEmail(validCustomerEmail, customerName, populated, previousStatus, nextStatus)
+                    .then(() => {
+                        console.log(`📧 Order status email sent to customer: ${validCustomerEmail} (${previousStatus} -> ${nextStatus})`);
+                    })
+                    .catch((err) => {
+                        console.error("📧 Customer order status email failed:", err.message);
+                    });
+            } else {
+                console.error("📧 Skipping customer status email — missing/invalid email on order:", updated._id);
+            }
+
+            sendAdminOrderStatusUpdateNotification(customerName, validCustomerEmail || customerEmail || "", populated, previousStatus, nextStatus)
+                .then(() => {
+                    console.log("📧 Admin order status notification sent");
+                })
+                .catch((err) => {
+                    console.error("📧 Admin order status notification failed:", err.message);
+                });
+        }
 
         res.json(populated);
     } catch (error) {
