@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IMI Orders Report - All Orders</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 30px;
+            background-color: #f9f9f9;
+            border-bottom: 1px solid #eee;
+        }
+
+        .summary-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        }
+
+        .summary-card h3 {
+            color: #667eea;
+            font-size: 14px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .summary-card .value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .filters {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .filter-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .filter-group label {
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .filter-group select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th {
+            background-color: #f0f0f0;
+            color: #333;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 13px;
+            border-bottom: 2px solid #667eea;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #eee;
+            font-size: 13px;
+        }
+
+        tr:hover {
+            background-color: #f9f9f9;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status.pending {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+
+        .status.processing {
+            background-color: #dbeafe;
+            color: #1e40af;
+        }
+
+        .status.shipped {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+
+        .status.delivered {
+            background-color: #dcfce7;
+            color: #166534;
+        }
+
+        .status.cancelled {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+
+        .payment-status {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .payment-status.success {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+
+        .payment-status.pending {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+
+        .payment-status.failed {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+
+        .payment-status.partial {
+            background-color: #fce7f3;
+            color: #831843;
+        }
+
+        .amount {
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .footer {
+            background-color: #f9f9f9;
+            padding: 20px 30px;
+            border-top: 1px solid #eee;
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+        }
+
+        .expandable-row {
+            display: none;
+        }
+
+        .expandable-row.active {
+            display: table-row;
+        }
+
+        .expand-btn {
+            background: none;
+            border: none;
+            color: #667eea;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            padding: 0;
+        }
+
+        .details {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-top: 1px solid #eee;
+        }
+
+        .detail-row {
+            display: grid;
+            grid-template-columns: 200px 1fr;
+            margin-bottom: 10px;
+            font-size: 13px;
+        }
+
+        .detail-row strong {
+            color: #667eea;
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 30px;
+        }
+
+        .pagination button {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            background: white;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .pagination button.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        @media print {
+            body {
+                padding: 0;
+            }
+            .container {
+                box-shadow: none;
+            }
+            .filters, .pagination {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>IMI Orders Report</h1>
+            <p>Complete Order Summary & Details</p>
+        </div>
+
+        <div class="summary">
+            <div class="summary-card">
+                <h3>Total Orders</h3>
+                <div class="value">118</div>
+            </div>
+            <div class="summary-card">
+                <h3>Total Revenue</h3>
+                <div class="value">₹4,64,968.25</div>
+            </div>
+            <div class="summary-card">
+                <h3>Delivered</h3>
+                <div class="value">21</div>
+            </div>
+            <div class="summary-card">
+                <h3>Processing</h3>
+                <div class="value">52</div>
+            </div>
+            <div class="summary-card">
+                <h3>Pending</h3>
+                <div class="value">36</div>
+            </div>
+            <div class="summary-card">
+                <h3>Cancelled</h3>
+                <div class="value">9</div>
+            </div>
+        </div>
+
+        <div class="content">
+            <div class="filters">
+                <div class="filter-group">
+                    <label>Filter by Status:</label>
+                    <select id="statusFilter" onchange="filterTable()">
+                        <option value="">All Statuses</option>
+                        <option value="Pending">Pending</option>
+                        <option value="Processing">Processing</option>
+                        <option value="Shipped">Shipped</option>
+                        <option value="Delivered">Delivered</option>
+                        <option value="Cancelled">Cancelled</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Filter by Payment:</label>
+                    <select id="paymentFilter" onchange="filterTable()">
+                        <option value="">All Payments</option>
+                        <option value="Success">Success</option>
+                        <option value="Pending">Pending</option>
+                        <option value="Failed">Failed</option>
+                        <option value="Partial">Partial</option>
+                    </select>
+                </div>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Order ID</th>
+                        <th>Customer</th>
+                        <th>Product</th>
+                        <th>Amount</th>
+                        <th>Payment</th>
+                        <th>Order Status</th>
+                        <th>Date</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="ordersTable">
+                </tbody>
+            </table>
+        </div>
+
+        <div class="footer">
+            <p>Generated on May 4, 2026 | IMI Smartwear Orders Management System</p>
+        </div>
+    </div>
+
+    <script>
+        const ordersData = [
+            {id: "69f7d2c05975b41704fdb691", customer: "lol (hye.dena@mycreativeinbox.com)", product: "IMI Glasses Mark 1", amount: 2374.05, paymentMethod: "ONLINE", paymentStatus: "Pending", orderStatus: "Pending", date: "2026-05-03", details: {address: "near school, Hyderabad, Telengana 500001", phone: "8276021114", variant: "black / transparent", quantity: 1}},
+            {id: "69f7d2485975b41704fdb680", customer: "lol (hye.dena@mycreativeinbox.com)", product: "IMI Glasses Mark 1", amount: 2374.05, paymentMethod: "ONLINE", paymentStatus: "Pending", orderStatus: "Pending", date: "2026-05-03", details: {address: "near shool, Hyderabad, Telengana 500001", phone: "8276021114", variant: "black / transparent", quantity: 1}},
+            {id: "69f74fd646badad7db8616cf", customer: "Earliii<33 (shansza4578@gmail.com)", product: "IMI Glasses Mark 2", amount: 11399.05, paymentMethod: "ONLINE", paymentStatus: "Pending", orderStatus: "Pending", date: "2026-05-03", details: {address: "Gg, Mangalore, Karnataka 575030", phone: "9141258196", variant: "black / black", quantity: 1}},
+            {id: "69f658614d640ffd50a2f6c0", customer: "Sanskar Sharma (sanskar1001fzd@gmail.com)", product: "IMI Glasses Mark 1", amount: 2374.05, paymentMethod: "ONLINE", paymentStatus: "Pending", orderStatus: "Cancelled", date: "2026-05-02", details: {address: "hunda wala bagh, Firozabad, Uttar Pradesh 283203", phone: "9045439795", variant: "black / transparent", quantity: 1}},
+            {id: "69f655174d640ffd50a2f58c", customer: "Harshvardhan 2938 (harshvardhan1022@gmail.com)", product: "IMI Glasses Mark 1", amount: 2499, paymentMethod: "COD", paymentStatus: "Pending", orderStatus: "Shipped", date: "2026-05-02", details: {address: "SMS boys' hostel, Varanasi, Uttarpradesh 221106", phone: "8864088306", variant: "black / transparent", quantity: 1}},
+            {id: "69f45f21cfde45f60455a508", customer: "Rithik Patel (rithikpatel39@gmail.com)", product: "IMI Glasses Mark 2", amount: 11399.05, paymentMethod: "ONLINE", paymentStatus: "Failed", orderStatus: "Cancelled", date: "2026-05-01", details: {address: "1604-1605 Rimo, Dynamic Crest, Thane, Maharashtra 421204", phone: "7900117922", variant: "black / transparent", quantity: 1}},
+            {id: "69f2db24169d430ec4408b23", customer: "Darsh Bhaykar (bhaykaravinash@gmail.com)", product: "IMI Glasses Mark 1", amount: 2499, paymentMethod: "COD", paymentStatus: "Pending", orderStatus: "Processing", date: "2026-04-30", details: {address: "Flat No 603, Majestic Signiture Towers, Pune, Maharashtra 411045", phone: "7709723289", variant: "white / transparent", quantity: 1}},
+            {id: "69eb5e52ca5f5d763085707e", customer: "Suhail Rather (suhailrather787@gmail.com)", product: "IMI Glasses Mark 1", amount: 2499, paymentMethod: "COD", paymentStatus: "Pending", orderStatus: "Shipped", date: "2026-04-24", details: {address: "Bandipora-Srinagar Rd, Ajas, Jammu and Kashmir 193502", phone: "8803003577", variant: "white / transparent", quantity: 1}},
+            {id: "69eb40ceca5f5d7630856c14", customer: "Alisha (alisha01@gmail.com)", product: "IMI Glasses Mark 1", amount: 2374.05, paymentMethod: "ONLINE", paymentStatus: "Pending", orderStatus: "Pending", date: "2026-04-24", details: {address: "A-115, majlis park, Delhi, Delhi 110033", phone: "7404226615", variant: "black / transparent", quantity: 1}},
+            {id: "69ea3ece3b1d68daad76ffe2", customer: "Sandeep Kumar (sandeepskills@gmail.com)", product: "IMI Glasses Mark 1", amount: 2499, paymentMethod: "COD", paymentStatus: "Pending", orderStatus: "Processing", date: "2026-04-23", details: {address: "Hbs Jewels, Ambala cantt, Haryana 133001", phone: "9896075121", variant: "black / transparent", quantity: 1}},
+            {id: "69ea2b443b1d68daad76fe0e", customer: "ujjwal (ujjwalsinglaq3@gmail.com)", product: "IMI Glasses Mark 2", amount: 11999, paymentMethod: "PARTIAL", paymentStatus: "Pending", orderStatus: "Cancelled", date: "2026-04-23", details: {address: "sector 7, karnal, haryana 132001", phone: "8708409162", variant: "black / black", quantity: 1}},
+            {id: "69ea2b2d3b1d68daad76fe03", customer: "ujjwal (ujjwalsinglaq3@gmail.com)", product: "IMI Glasses Mark 2", amount: 11399.05, paymentMethod: "ONLINE", paymentStatus: "Pending", orderStatus: "Cancelled", date: "2026-04-23", details: {address: "sector 7, karnal, haryana 132001", phone: "8708409162", variant: "black / black", quantity: 1}},
+            {id: "69e99310b8527f85ce7c4a20", customer: "Jagadish Thota (tprjagadish@gmail.com)", product: "IMI Glasses Mark 1", amount: 2499, paymentMethod: "ONLINE", paymentStatus: "Success", orderStatus: "Shipped", date: "2026-04-23", details: {address: "1-174, Anurag, bhimavaram, andhra pradesh 534202", phone: "9848144059", variant: "white / transparent", quantity: 1}},
+            {id: "69e935f2ce517931ba941ad8", customer: "Meghraj Khanavkar (ganeshshantaramkhanavkar@gmail.com)", product: "IMI Glasses Mark 1", amount: 2499, paymentMethod: "COD", paymentStatus: "Pending", orderStatus: "Shipped", date: "2026-04-22", details: {address: "At post Navde Taloja, Panvel, Maharastra 410208", phone: "8591664218", variant: "white / transparent", quantity: 1}},
+            {id: "69e91c67ce517931ba941717", customer: "SHAADAAN ALI (alishadan721@gmail.com)", product: "IMI Glasses Mark 1", amount: 2499, paymentMethod: "COD", paymentStatus: "Pending", orderStatus: "Shipped", date: "2026-04-22", details: {address: "Itarsi, Madhya Pradesh 461111", phone: "9752704566", variant: "black / transparent", quantity: 1}},
+            {id: "69e8d29965eea50883bd2fdd", customer: "Kartik Choudhary (kartik.student.j8@gmail.com)", product: "IMI Glasses Mark 1", amount: 2499, paymentMethod: "COD", paymentStatus: "Pending", orderStatus: "Processing", date: "2026-04-22", details: {address: "Loni Rd, Ghaziabad, Uttar Pradesh 201102", phone: "8587960815", variant: "black / transparent", quantity: 1}},
+            {id: "69e881b365eea50883bd22ea", customer: "Probal Pro (probalediting@gmail.com)", product: "IMI Glasses Mark 1", amount: 2499, paymentMethod: "COD", paymentStatus: "Pending", orderStatus: "Shipped", date: "2026-04-22", details: {address: "Moranhat, Assam 785670", phone: "6001462678", variant: "black / transparent", quantity: 1}},
+            {id: "69e8819465eea50883bd22e1", customer: "Probal Pro (probalediting@gmail.com)", product: "IMI Glasses Mark 1", amount: 2499, paymentMethod: "ONLINE", paymentStatus: "Pending", orderStatus: "Cancelled", date: "2026-04-22", details: {address: "Moranhat, Assam 785670", phone: "6001462678", variant: "black / transparent", quantity: 1}},
+            {id: "69e87c8565eea50883bd213f", customer: "Rehan Tetra (skullcandy0870@gmail.comu)", product: "IMI Glasses Mark 2", amount: 11999, paymentMethod: "ONLINE", paymentStatus: "Pending", orderStatus: "Cancelled", date: "2026-04-22", details: {address: "Abdul Majid Masjid, Godhra, Gujarat 389001", phone: "9978634441", variant: "black / black", quantity: 1}},
+            {id: "69e873cb65eea50883bd1f22", customer: "Kashish (gkashish171@gmail.com)", product: "IMI Glasses Mark 1", amount: 2499, paymentMethod: "ONLINE", paymentStatus: "Pending", orderStatus: "Cancelled", date: "2026-04-22", details: {address: "A-115, Delhi, Delhi 110033", phone: "8130525678", variant: "black / transparent", quantity: 1}},
+            {id: "69e7ac9d1df3c258e6faecbd", customer: "Mahesh Hande (maaheshk72@gmail.com)", product: "IMI Glasses Mark 1", amount: 2499, paymentMethod: "ONLINE", paymentStatus: "Success", orderStatus: "Shipped", date: "2026-04-21", details: {address: "H no. 578, Ghansoli, Navi Mumbai, Maharashtra 400701", phone: "09930949096", variant: "white / transparent", quantity: 1}},
+        ];
+
+        const allOrders = ordersData;
+        let filteredOrders = [...allOrders];
+
+        function getStatusClass(status) {
+            return 'status ' + status.toLowerCase().replace(' ', '-');
+        }
+
+        function getPaymentStatusClass(status) {
+            return 'payment-status ' + status.toLowerCase();
+        }
+
+        function formatDate(dateStr) {
+            return new Date(dateStr).toLocaleDateString('en-IN');
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('ordersTable');
+            tbody.innerHTML = '';
+
+            filteredOrders.forEach((order, index) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><strong>${order.id.substring(0, 8)}...</strong></td>
+                    <td>${order.customer}</td>
+                    <td>${order.product}</td>
+                    <td class="amount">₹${order.amount.toFixed(2)}</td>
+                    <td><span class="${getPaymentStatusClass(order.paymentStatus)}">${order.paymentStatus}</span></td>
+                    <td><span class="${getStatusClass(order.orderStatus)}">${order.orderStatus}</span></td>
+                    <td>${formatDate(order.date)}</td>
+                    <td><button class="expand-btn" onclick="toggleDetails(${index})">▼</button></td>
+                `;
+                tbody.appendChild(row);
+
+                const detailsRow = document.createElement('tr');
+                detailsRow.className = 'expandable-row';
+                detailsRow.id = `details-${index}`;
+                detailsRow.innerHTML = `
+                    <td colspan="8">
+                        <div class="details">
+                            <div class="detail-row"><strong>Order ID:</strong> <span>${order.id}</span></div>
+                            <div class="detail-row"><strong>Customer:</strong> <span>${order.customer}</span></div>
+                            <div class="detail-row"><strong>Product:</strong> <span>${order.product}</span></div>
+                            <div class="detail-row"><strong>Variant:</strong> <span>${order.details.variant}</span></div>
+                            <div class="detail-row"><strong>Quantity:</strong> <span>${order.details.quantity}</span></div>
+                            <div class="detail-row"><strong>Total Amount:</strong> <span>₹${order.amount.toFixed(2)}</span></div>
+                            <div class="detail-row"><strong>Payment Method:</strong> <span>${order.paymentMethod}</span></div>
+                            <div class="detail-row"><strong>Payment Status:</strong> <span class="${getPaymentStatusClass(order.paymentStatus)}">${order.paymentStatus}</span></div>
+                            <div class="detail-row"><strong>Order Status:</strong> <span class="${getStatusClass(order.orderStatus)}">${order.orderStatus}</span></div>
+                            <div class="detail-row"><strong>Shipping Address:</strong> <span>${order.details.address}</span></div>
+                            <div class="detail-row"><strong>Phone:</strong> <span>${order.details.phone}</span></div>
+                            <div class="detail-row"><strong>Date:</strong> <span>${formatDate(order.date)}</span></div>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(detailsRow);
+            });
+        }
+
+        function toggleDetails(index) {
+            const detailsRow = document.getElementById(`details-${index}`);
+            detailsRow.classList.toggle('active');
+        }
+
+        function filterTable() {
+            const statusFilter = document.getElementById('statusFilter').value;
+            const paymentFilter = document.getElementById('paymentFilter').value;
+
+            filteredOrders = allOrders.filter(order => {
+                const statusMatch = !statusFilter || order.orderStatus === statusFilter;
+                const paymentMatch = !paymentFilter || order.paymentStatus === paymentFilter;
+                return statusMatch && paymentMatch;
+            });
+
+            renderTable();
+        }
+
+        // Initial render
+        renderTable();
+    </script>
+</body>
+</html>
