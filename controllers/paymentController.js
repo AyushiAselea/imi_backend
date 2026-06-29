@@ -4,39 +4,22 @@ const Order = require("../models/Order");
 const { sendOrderConfirmationEmail, sendAdminOrderNotification } = require("../utils/emailService");
 
 /**
- * Zaakpay V13 checksum — HMAC-SHA256 over the ordered pipe-separated param values.
+ * Zaakpay checksum — HMAC-SHA256 over alphabetically-sorted non-empty fields.
  *
- * Official field order for /api/paymentTransact/V13 (from Zaakpay integration docs):
- *   merchantIdentifier | orderId | amount | currency | buyerEmailAddress |
- *   buyerFirstName | buyerLastName | buyerAddress | buyerCity | buyerState |
- *   buyerCountry | buyerPincode | buyerPhoneNumber | productDescription |
- *   returnUrl | mode
- *
- * All values are joined with "|" and HMAC-SHA256'd with the merchant's Generated Key.
+ * Per official Zaakpay docs:
+ *   1. Take all posted fields (excluding "checksum" itself).
+ *   2. Sort keys alphabetically (A-Z).
+ *   3. Exclude any field whose value is empty/null/undefined.
+ *   4. Build string: "key1=val1&key2=val2&..." (trailing "&" after each pair).
+ *   5. HMAC-SHA256(generatedKey, string).digest("hex").
  */
-const CHECKSUM_FIELD_ORDER = [
-    "merchantIdentifier",
-    "orderId",
-    "amount",
-    "currency",
-    "buyerEmailAddress",
-    "buyerFirstName",
-    "buyerLastName",
-    "buyerAddress",
-    "buyerCity",
-    "buyerState",
-    "buyerCountry",
-    "buyerPincode",
-    "buyerPhoneNumber",
-    "productDescription",
-    "returnUrl",
-    "mode",
-];
-
 const buildZaakpayChecksum = (secretKey, fields) => {
-    const valueString = CHECKSUM_FIELD_ORDER.map((k) => fields[k] ?? "").join("|");
-    const checksum = crypto.createHmac("sha256", secretKey).update(valueString).digest("hex");
-    return checksum;
+    const str = Object.keys(fields)
+        .sort()
+        .filter((k) => fields[k] !== "" && fields[k] != null)
+        .map((k) => `${k}=${fields[k]}&`)
+        .join("");
+    return crypto.createHmac("sha256", secretKey).update(str).digest("hex");
 };
 
 /**
@@ -220,25 +203,26 @@ const createPayment = async (req, res) => {
         const amountInPaise = String(Math.round(chargeAmount * 100));
 
         const zaakpayFields = {
-            merchantIdentifier,
-            orderId:             txnid,
             amount:              amountInPaise,
-            currency:            "INR",
-            buyerEmailAddress:   email,
-            buyerFirstName,
-            buyerLastName,
             buyerAddress:        shippingAddress.addressLine1,
             buyerCity:           shippingAddress.city,
-            buyerState:          shippingAddress.state,
             buyerCountry:        shippingAddress.country || "India",
-            buyerPincode:        shippingAddress.postalCode,
+            buyerEmail:          email,
+            buyerFirstName,
+            buyerLastName,
             buyerPhoneNumber:    phone || "",
+            buyerPincode:        shippingAddress.postalCode,
+            buyerState:          shippingAddress.state,
+            currency:            "INR",
+            merchantIdentifier,
+            mode:                "0",
+            orderId:             txnid,
             productDescription:  productinfo,
             returnUrl,
-            mode:                "0",   // 0 = all payment modes
         };
 
         const checksum = buildZaakpayChecksum(secretKey, zaakpayFields);
+        console.log(`[Zaakpay] txnid=${txnid} checksum=${checksum}`);
 
         const paymentData = {
             ...zaakpayFields,
