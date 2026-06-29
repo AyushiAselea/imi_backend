@@ -7,14 +7,14 @@ const run = async () => {
     await mongoose.connect(process.env.MONGO_URI);
     console.log('Connected to MongoDB');
 
-    const existing = await Product.findOne({ name: 'Sample PayU Product' });
+    const existing = await Product.findOne({ name: 'Sample Zaakpay Product' });
     if (existing) {
       console.log('Sample product already exists:', existing._id);
       process.exit(0);
     }
 
     const product = await Product.create({
-      name: 'Sample PayU Product',
+      name: 'Sample Zaakpay Product',
       description: 'A product created for PayU integration testing',
       price: 99.99,
       image: '',

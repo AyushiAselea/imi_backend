@@ -1,34 +1,23 @@
 const crypto = require("crypto");
-const https = require("https");
-const querystring = require("querystring");
 const Product = require("../models/Product");
 const Order = require("../models/Order");
 const { sendOrderConfirmationEmail, sendAdminOrderNotification } = require("../utils/emailService");
 
 /**
- * Generate PayU hash using SHA-512.
- *
- * hashString = key|txnid|amount|productinfo|firstname|email|||||||||||salt
+ * Build the Zaakpay "orderDetail" param string and compute its HMAC-SHA256 checksum.
+ * Zaakpay checksum = HMAC_SHA256(secretKey, "&"-joined "key=value" order params)
+ * Field order matters and must match Zaakpay's documented sequence.
  */
-const generateHash = (params) => {
-    const { key, txnid, amount, productinfo, firstname, email, salt } = params;
-    const hashString = `${key}|${txnid}|${amount}|${productinfo}|${firstname}|${email}|||||||||||${salt}`;
-    return crypto.createHash("sha512").update(hashString).digest("hex");
+const buildZaakpayChecksum = (secretKey, fields) => {
+    const orderString = Object.entries(fields)
+        .map(([k, v]) => `${k}=${v ?? ""}`)
+        .join("&");
+    const checksum = crypto.createHmac("sha256", secretKey).update(orderString).digest("hex");
+    return { orderString, checksum };
 };
 
 /**
- * Verify PayU response hash (reverse hash).
- *
- * reverseHashString = salt|status|||||||||||email|firstname|productinfo|amount|txnid|key
- */
-const verifyHash = (params) => {
-    const { salt, status, email, firstname, productinfo, amount, txnid, key } = params;
-    const reverseHashString = `${salt}|${status}|||||||||||${email}|${firstname}|${productinfo}|${amount}|${txnid}|${key}`;
-    return crypto.createHash("sha512").update(reverseHashString).digest("hex");
-};
-
-/**
- * @desc    Create PayU payment — returns form fields for hosted checkout
+ * @desc    Create Zaakpay payment — returns form fields for hosted checkout
  *          Also handles COD and partial payment flows.
  * @route   POST /api/payment/create
  * @access  Private
@@ -95,7 +84,7 @@ const createPayment = async (req, res) => {
         // ── Calculate amounts based on paymentMethod ─────────
         let advanceAmount = 0;
         let remainingAmount = 0;
-        let chargeAmount = totalAmount; // amount to charge via PayU
+        let chargeAmount = totalAmount; // amount to charge via Zaakpay
         let deliveryPaymentPending = false;
 
         if (paymentMethod === "COD") {
@@ -120,7 +109,7 @@ const createPayment = async (req, res) => {
             ? [{ product: productDbId, quantity, variant }]
             : [{ productName: productinfo, quantity, price: totalAmount / quantity, variant }];
 
-        // ── COD: create order immediately (no PayU) ──────────
+        // ── COD: create order immediately (no Zaakpay) ───────
         if (paymentMethod === "COD") {
             const order = await Order.create({
                 user: userId,
@@ -167,27 +156,23 @@ const createPayment = async (req, res) => {
             });
         }
 
-        // ── ONLINE or PARTIAL: initiate PayU payment ─────────
+        // ── ONLINE or PARTIAL: initiate Zaakpay payment ──────
         if (!email) {
             return res.status(400).json({ message: "Email address is required for online payment" });
         }
 
         const txnid = `TXN_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
 
-        const key = process.env.PAYU_MERCHANT_KEY;
-        const salt = process.env.PAYU_MERCHANT_SALT;
-        const payuBaseUrl = (process.env.PAYU_BASE_URL || "https://secure.payu.in").replace(/\/+$/, "");
+        const merchantIdentifier = process.env.ZAAKPAY_MERCHANT_IDENTIFIER;
+        const secretKey = process.env.ZAAKPAY_SECRET_KEY;
+        const zaakpayBaseUrl = (process.env.ZAAKPAY_BASE_URL || "https://zaakstaging.zaakpay.com").replace(/\/+$/, "");
 
-        if (!key || !salt) {
-            return res.status(500).json({ message: "PayU credentials not configured" });
+        if (!merchantIdentifier || !secretKey) {
+            return res.status(500).json({ message: "Zaakpay credentials not configured" });
         }
 
-        const amount = chargeAmount.toFixed(2);
-        const hash = generateHash({ key, txnid, amount, productinfo, firstname, email, salt });
-
         const baseUrl = (process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/+$/, "");
-        const surl = `${baseUrl}/api/payment/success`;
-        const furl = `${baseUrl}/api/payment/failure`;
+        const returnUrl = `${baseUrl}/api/payment/callback`;
 
         // Create pending order
         const order = await Order.create({
@@ -205,19 +190,35 @@ const createPayment = async (req, res) => {
             status: "Pending",
         });
 
-        const paymentData = {
-            key,
-            txnid,
-            amount,
-            productinfo,
-            firstname,
+        // Zaakpay amount is in paise (smallest currency unit)
+        const amountInPaise = Math.round(chargeAmount * 100);
+
+        const zaakpayFields = {
+            merchantIdentifier,
+            orderId: txnid,
+            amount: amountInPaise,
+            currency: "INR",
             email,
-            phone,
-            surl,
-            furl,
-            hash,
-            action: `${payuBaseUrl}/_payment`,
-            orderId: order._id,
+            mode: "0",          // 0 = all payment modes
+            returnUrl,
+            buyerFirstName: firstname,
+            buyerEmail: email,
+            buyerPhoneNumber: phone || "",
+            buyerAddress: shippingAddress.addressLine1,
+            buyerCity: shippingAddress.city,
+            buyerState: shippingAddress.state,
+            buyerCountry: shippingAddress.country || "India",
+            buyerPincode: shippingAddress.postalCode,
+            purpose: productinfo,
+        };
+
+        const { checksum } = buildZaakpayChecksum(secretKey, zaakpayFields);
+
+        const paymentData = {
+            ...zaakpayFields,
+            checksum,
+            action: `${zaakpayBaseUrl}/api/paymentTransact`,
+            orderDbId: order._id,
         };
 
         res.status(200).json({
@@ -233,48 +234,49 @@ const createPayment = async (req, res) => {
 };
 
 /**
- * @desc    Handle PayU success callback
- * @route   POST /api/payment/success
- * @access  Public (called by PayU)
+ * @desc    Handle Zaakpay return callback (success/failure both land here)
+ * @route   POST /api/payment/callback
+ * @access  Public (called by Zaakpay)
  */
-const paymentSuccess = async (req, res) => {
+const paymentCallback = async (req, res) => {
     try {
         const {
-            mihpayid,
-            status,
-            txnid,
-            amount,
-            productinfo,
-            firstname,
-            email,
-            hash: receivedHash,
+            responseCode,
+            orderId,
+            checksum: receivedChecksum,
+            txnId: zaakpayTxnId,
         } = req.body;
 
-        // Verify the response hash
-        const salt = process.env.PAYU_MERCHANT_SALT;
-        const key = process.env.PAYU_MERCHANT_KEY;
+        const secretKey = process.env.ZAAKPAY_SECRET_KEY;
 
-        const calculatedHash = verifyHash({
-            salt,
-            status,
-            email,
-            firstname,
-            productinfo,
-            amount,
-            txnid,
-            key,
-        });
+        // Verify checksum: recompute HMAC-SHA256 over all fields except checksum itself
+        const fieldsForChecksum = { ...req.body };
+        delete fieldsForChecksum.checksum;
+        const { checksum: calculatedChecksum } = buildZaakpayChecksum(secretKey, fieldsForChecksum);
 
-        if (calculatedHash !== receivedHash) {
-            console.error("Payment hash verification failed for txnid:", txnid);
-            return res.status(400).json({ message: "Payment verification failed — hash mismatch" });
+        const frontendUrl = (process.env.FRONTEND_URL || "http://localhost:8080").replace(/\/+$/, "");
+
+        if (!receivedChecksum || calculatedChecksum !== receivedChecksum) {
+            console.error("Zaakpay checksum verification failed for orderId:", orderId);
+            return res.redirect(`${frontendUrl}/payment/failure?txnid=${orderId}`);
         }
 
-        // Find and update the order
-        const order = await Order.findOne({ paymentId: txnid });
+        // Find the order (Zaakpay's orderId == our txnid)
+        const order = await Order.findOne({ paymentId: orderId });
         if (!order) {
-            console.error("Order not found for txnid:", txnid);
-            return res.status(404).json({ message: "Order not found" });
+            console.error("Order not found for txnid:", orderId);
+            return res.redirect(`${frontendUrl}/payment/failure?txnid=${orderId}`);
+        }
+
+        // responseCode "100" == success per Zaakpay docs
+        const isSuccess = responseCode === "100" || responseCode === 100;
+
+        if (!isSuccess) {
+            order.paymentStatus = "Failed";
+            order.status = "Cancelled";
+            await order.save();
+            console.warn("Payment failed for txnid:", orderId, "| responseCode:", responseCode);
+            return res.redirect(`${frontendUrl}/payment/failure?txnid=${orderId}`);
         }
 
         // Set payment status based on payment method
@@ -296,7 +298,6 @@ const paymentSuccess = async (req, res) => {
         }
 
         // Send order confirmation email (non-blocking)
-        // PayU callback has no req.user — use the already-populated order.user
         try {
             const populated = await Order.findById(order._id)
                 .populate("user", "name email")
@@ -313,45 +314,16 @@ const paymentSuccess = async (req, res) => {
             console.error("Order email lookup failed:", emailErr.message);
         }
 
-        // Redirect to frontend success page
-        const frontendUrl = (process.env.FRONTEND_URL || "http://localhost:8080").replace(/\/+$/, "");
-        res.redirect(`${frontendUrl}/payment/success?txnid=${txnid}&mihpayid=${mihpayid}`);
+        res.redirect(`${frontendUrl}/payment/success?txnid=${orderId}&mihpayid=${zaakpayTxnId || ""}`);
     } catch (error) {
-        console.error("Payment success handler error:", error.message);
-        res.status(500).json({ message: "Server error processing payment success" });
+        console.error("Payment callback handler error:", error.message);
+        const frontendUrl = (process.env.FRONTEND_URL || "http://localhost:8080").replace(/\/+$/, "");
+        res.redirect(`${frontendUrl}/payment/failure`);
     }
 };
 
 /**
- * @desc    Handle PayU failure callback
- * @route   POST /api/payment/failure
- * @access  Public (called by PayU)
- */
-const paymentFailure = async (req, res) => {
-    try {
-        const { txnid, status } = req.body;
-
-        // Find and update the order
-        const order = await Order.findOne({ paymentId: txnid });
-        if (order) {
-            order.paymentStatus = "Failed";
-            order.status = "Cancelled";
-            await order.save();
-        }
-
-        console.warn("Payment failed for txnid:", txnid, "| Status:", status);
-
-        // Redirect to frontend failure page
-        const frontendUrl = (process.env.FRONTEND_URL || "http://localhost:8080").replace(/\/+$/, "");
-        res.redirect(`${frontendUrl}/payment/failure?txnid=${txnid}`);
-    } catch (error) {
-        console.error("Payment failure handler error:", error.message);
-        res.status(500).json({ message: "Server error processing payment failure" });
-    }
-};
-
-/**
- * @desc    Verify a PayU transaction using PayU's Verify Payment API
+ * @desc    Verify a Zaakpay transaction using Zaakpay's Check Transaction Status API
  * @route   POST /api/payment/verify
  * @access  Private
  */
@@ -362,63 +334,39 @@ const verifyPayment = async (req, res) => {
             return res.status(400).json({ message: "txnid is required" });
         }
 
-        const key  = process.env.PAYU_MERCHANT_KEY;
-        const salt = process.env.PAYU_MERCHANT_SALT;
+        const merchantIdentifier = process.env.ZAAKPAY_MERCHANT_IDENTIFIER;
+        const secretKey = process.env.ZAAKPAY_SECRET_KEY;
+        const zaakpayBaseUrl = (process.env.ZAAKPAY_BASE_URL || "https://zaakstaging.zaakpay.com").replace(/\/+$/, "");
 
-        // PayU verify hash: sha512(key|verify_payment|txnid|salt)
-        const commandString = `${key}|verify_payment|${txnid}|${salt}`;
-        const verifyHash = crypto.createHash("sha512").update(commandString).digest("hex");
+        const statusFields = { merchantIdentifier, orderId: txnid };
+        const { checksum } = buildZaakpayChecksum(secretKey, statusFields);
 
-        const postData = querystring.stringify({
-            key,
-            command: "verify_payment",
-            var1: txnid,
-            hash: verifyHash,
-        });
-
-        const options = {
-            hostname: "info.payu.in",
-            path: "/merchant/postservice?form=2",
+        const response = await fetch(`${zaakpayBaseUrl}/api/checkTxnStatus`, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Content-Length": Buffer.byteLength(postData),
-            },
-        };
-
-        const payuResponse = await new Promise((resolve, reject) => {
-            const request = https.request(options, (response) => {
-                let data = "";
-                response.on("data", (chunk) => { data += chunk; });
-                response.on("end", () => {
-                    try { resolve(JSON.parse(data)); }
-                    catch (e) { resolve(data); }
-                });
-            });
-            request.on("error", reject);
-            request.write(postData);
-            request.end();
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({ ...statusFields, checksum }).toString(),
         });
+        const zaakpayResponse = await response.json().catch(() => ({}));
 
         // Update local order with verified status
         const order = await Order.findOne({ paymentId: txnid });
-        if (order && payuResponse?.transaction_details?.[txnid]) {
-            const txnStatus = payuResponse.transaction_details[txnid].status;
-            if (txnStatus === "success") {
+        if (order && zaakpayResponse?.responseCode != null) {
+            const isSuccess = zaakpayResponse.responseCode === "100" || zaakpayResponse.responseCode === 100;
+            if (isSuccess) {
                 order.paymentStatus = "Success";
                 order.status = "Processing";
-            } else if (txnStatus === "failure" || txnStatus === "failed") {
+            } else {
                 order.paymentStatus = "Failed";
                 order.status = "Cancelled";
             }
             await order.save();
         }
 
-        res.status(200).json({ success: true, payuResponse, order });
+        res.status(200).json({ success: true, zaakpayResponse, order });
     } catch (error) {
         console.error("Verify payment error:", error.message);
         res.status(500).json({ message: "Server error verifying payment" });
     }
 };
 
-module.exports = { createPayment, paymentSuccess, paymentFailure, verifyPayment };
+module.exports = { createPayment, paymentCallback, verifyPayment };

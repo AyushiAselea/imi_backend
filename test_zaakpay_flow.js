@@ -12,14 +12,15 @@
     const prodRes = await fetch(`${base}/api/products`);
     const products = await prodRes.json();
     log('products', products);
-    const productId = (Array.isArray(products) && products[0] && products[0]._id) ? products[0]._id : null;
+    const productList = Array.isArray(products) ? products : products.products;
+    const productId = (Array.isArray(productList) && productList[0] && productList[0]._id) ? productList[0]._id : null;
     if (!productId) {
       console.error('No product available to test. Create a product first.');
       process.exit(1);
     }
 
     // 2) Register user (if already exists, ignore error)
-    const testUser = { name: 'Test PayU', email: 'testpayu@example.com', password: 'password123' };
+    const testUser = { name: 'Test Zaakpay', email: 'testzaakpay@example.com', password: 'password123' };
     const regRes = await fetch(`${base}/api/auth/register`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(testUser)
     });
@@ -42,10 +43,30 @@
     // 4) Call payment create
     const payRes = await fetch(`${base}/api/payment/create`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ productId, quantity: 1 })
+      body: JSON.stringify({
+        productId,
+        quantity: 1,
+        paymentMethod: 'ONLINE',
+        shippingAddress: {
+          fullName: 'Test Zaakpay',
+          phone: '9999999999',
+          addressLine1: '123 Test Street',
+          city: 'Mumbai',
+          state: 'Maharashtra',
+          postalCode: '400001',
+          country: 'India',
+        },
+      })
     });
     const payJson = await payRes.json();
     log('paymentCreate', payJson);
+
+    if (payJson.paymentData) {
+      console.log('\nZaakpay form action:', payJson.paymentData.action);
+      console.log('Checksum generated:', payJson.paymentData.checksum);
+      console.log('\nTo complete the test manually, submit these fields as a POST form to the action URL above,');
+      console.log('or open imi-ai-smartwear checkout in the browser and use test card 4111 1111 1111 1111, CVV 123, Exp 07/29, OTP 1234.');
+    }
 
     process.exit(0);
   } catch (err) {
