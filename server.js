@@ -21,16 +21,18 @@ const settingsRoutes = require("./routes/settingsRoutes");
 const app = express();
 
 // ─── MIDDLEWARE ───────────────────────────────────────────────
-// Use open CORS — auth is Bearer-token based (no cookies), so origin: "*" is safe.
-app.use(
-  cors({
-    origin: "*",
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
+// Reflect the request origin rather than sending "*". navigator.sendBeacon
+// (used by the analytics tracker) always sends credentials mode "include",
+// and browsers reject a wildcard Access-Control-Allow-Origin in that case.
+const corsOptions = {
+  origin: (origin, callback) => callback(null, origin || true),
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
+app.use(cors(corsOptions));
 // Explicitly handle preflight for all routes
-app.options("*", cors());
+app.options("*", cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
