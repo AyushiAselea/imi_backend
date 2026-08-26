@@ -56,6 +56,43 @@ app.get("/", (req, res) => {
     res.json({ message: "IMI Backend API is running 🚀" });
 });
 
+// ─── TEMPORARY DIAGNOSTIC ────────────────────────────────────
+// Reports this server's outbound IP so we can give Zaakpay the address our
+// payment requests originate from, and shows whether their endpoints are
+// reachable from Render. REMOVE once Zaakpay has finished investigating.
+app.get("/api/debug/ip", async (req, res) => {
+    const probe = async (url, opts) => {
+        const started = Date.now();
+        try {
+            const r = await fetch(url, { signal: AbortSignal.timeout(15000), ...opts });
+            return { status: r.status, ms: Date.now() - started };
+        } catch (err) {
+            return { error: err.name === "TimeoutError" ? "timeout" : err.message, ms: Date.now() - started };
+        }
+    };
+
+    const ipRes = await probe("https://api.ipify.org?format=json");
+    let outboundIp = null;
+    try {
+        const r = await fetch("https://api.ipify.org?format=json", { signal: AbortSignal.timeout(15000) });
+        outboundIp = (await r.json()).ip;
+    } catch { /* reported via ipRes */ }
+
+    res.json({
+        outboundIp,
+        ipLookup: ipRes,
+        region: process.env.RENDER_REGION || "unknown",
+        serviceId: process.env.RENDER_SERVICE_ID || "unknown",
+        zaakpayBaseUrl: process.env.ZAAKPAY_BASE_URL || null,
+        reachability: {
+            zaakpayHomepage: await probe("https://zaakpay.com/"),
+            zaakpayTransactV13: await probe("https://zaakpay.com/api/paymentTransact/V13", { method: "POST", body: "t=1", headers: { "Content-Type": "application/x-www-form-urlencoded" } }),
+            zaakpayStaging: await probe("https://zaakstaging.zaakpay.com/api/paymentTransact/V13", { method: "POST", body: "t=1", headers: { "Content-Type": "application/x-www-form-urlencoded" } }),
+        },
+        checkedAt: new Date().toISOString(),
+    });
+});
+
 // ─── 404 HANDLER ─────────────────────────────────────────────
 app.use((req, res) => {
     res.status(404).json({ message: `Route not found: ${req.originalUrl}` });
