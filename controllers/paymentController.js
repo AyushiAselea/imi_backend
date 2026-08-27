@@ -181,7 +181,12 @@ const createPayment = async (req, res) => {
         }
 
         const baseUrl   = (process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/+$/, "");
-        const returnUrl = `${baseUrl}/api/payment/callback`;
+        // Zaakpay requires the return URL to be on the same domain as the
+        // registered Website URL, so it points at the public site (which
+        // proxies /api/payment/* through to this backend) rather than at the
+        // backend host directly. Falls back to BACKEND_URL if unset.
+        const returnUrlBase = (process.env.PAYMENT_RETURN_URL_BASE || baseUrl).replace(/\/+$/, "");
+        const returnUrl = `${returnUrlBase}/api/payment/callback`;
 
         // Create pending order
         const order = await Order.create({
