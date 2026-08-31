@@ -255,25 +255,58 @@ const createPayment = async (req, res) => {
  */
 const paymentCallback = async (req, res) => {
     try {
-        const {
-            responseCode,
-            orderId,
-            checksum: receivedChecksum,
-            txnId: zaakpayTxnId,
-        } = req.body;
+        // Log the raw callback so the exact field shape Zaakpay posts is visible.
+        console.log("[Zaakpay callback] raw body:", JSON.stringify(req.body));
+
+        // Zaakpay V13 posts the result as a JSON string in a "data" field rather
+        // than as flat form fields. Older/alternate integrations post flat fields,
+        // so support both.
+        let payload = req.body;
+        if (typeof req.body.data === "string") {
+            try {
+                payload = JSON.parse(req.body.data);
+                console.log("[Zaakpay callback] parsed data:", JSON.stringify(payload));
+            } catch (parseErr) {
+                console.error("[Zaakpay callback] could not parse data field:", parseErr.message);
+            }
+        }
+
+        const responseCode     = payload.responseCode;
+        const orderId          = payload.orderId;
+        const receivedChecksum = payload.checksum ?? req.body.checksum;
+        const zaakpayTxnId     = payload.txnId ?? payload.zaakpayTxnId;
 
         const secretKey    = process.env.ZAAKPAY_SECRET_KEY;
         const frontendUrl  = (process.env.FRONTEND_URL || "http://localhost:8080").replace(/\/+$/, "");
 
-        // Verify checksum: rebuild from the same ordered fields, excluding "checksum" itself
-        const fieldsForChecksum = { ...req.body };
-        delete fieldsForChecksum.checksum;
-        const calculatedChecksum = buildZaakpayChecksum(secretKey, fieldsForChecksum);
-
-        if (!receivedChecksum || calculatedChecksum !== receivedChecksum) {
-            console.error("Zaakpay checksum verification failed for orderId:", orderId);
-            return res.redirect(`${frontendUrl}/payment/failure?txnid=${orderId || ""}`);
+        // Verify checksum. Zaakpay signs the RESPONSE differently from the request:
+        // when the result arrives as a "data" field, the HMAC is computed over that
+        // exact JSON string as-sent — not over re-sorted key=value pairs. Re-sorting
+        // the parsed object produces a different string and always mismatches.
+        // Try the response form first, then fall back to the request-style form for
+        // flat (non-"data") callbacks.
+        const candidates = [];
+        if (typeof req.body.data === "string") {
+            candidates.push(["data-string", crypto.createHmac("sha256", secretKey).update(req.body.data).digest("hex")]);
         }
+        const fieldsForChecksum = { ...payload };
+        delete fieldsForChecksum.checksum;
+        candidates.push(["sorted-fields", buildZaakpayChecksum(secretKey, fieldsForChecksum)]);
+
+        const matched = receivedChecksum
+            ? candidates.find(([, value]) => value === receivedChecksum)
+            : null;
+
+        if (!matched) {
+            console.error(
+                "Zaakpay checksum verification failed for orderId:", orderId,
+                "| received:", receivedChecksum,
+                "| tried:", JSON.stringify(Object.fromEntries(candidates)),
+                "| responseCode:", responseCode
+            );
+            return res.redirect(`${frontendUrl}/payment/failure?txnid=${orderId || ""}&reason=checksum`);
+        }
+        console.log(`[Zaakpay callback] checksum verified via ${matched[0]} for orderId=${orderId}`);
 
         // Find the order (our txnid == Zaakpay's orderId)
         const order = await Order.findOne({ paymentId: orderId });
@@ -282,14 +315,19 @@ const paymentCallback = async (req, res) => {
             return res.redirect(`${frontendUrl}/payment/failure?txnid=${orderId || ""}`);
         }
 
-        // responseCode "100" == success per Zaakpay docs
-        const isSuccess = responseCode === "100" || responseCode === 100;
+        // responseCode "100" == success per Zaakpay docs. Zaakpay may send it as a
+        // string or number, and some responses zero-pad it, so normalise first.
+        const isSuccess = String(responseCode).trim() === "100";
 
         if (!isSuccess) {
             order.paymentStatus = "Failed";
             order.status = "Cancelled";
             await order.save();
-            console.warn("Payment failed for txnid:", orderId, "| responseCode:", responseCode);
+            console.warn(
+                "Payment failed for txnid:", orderId,
+                "| responseCode:", responseCode,
+                "| description:", payload.responseDescription
+            );
             return res.redirect(`${frontendUrl}/payment/failure?txnid=${orderId}`);
         }
 
