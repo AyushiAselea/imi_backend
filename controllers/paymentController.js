@@ -249,6 +249,51 @@ const createPayment = async (req, res) => {
 };
 
 /**
+ * Ask Zaakpay directly whether a transaction succeeded, via the Check Transaction
+ * Status API. This is a server-to-server call to Zaakpay, so its answer is
+ * trustworthy independent of anything the browser posted back to us.
+ *
+ * Returns true/false when Zaakpay gives a definitive answer, or null if the
+ * status could not be determined (network error, unparseable response).
+ */
+const confirmTransactionWithZaakpay = async (orderId) => {
+    try {
+        const merchantIdentifier = process.env.ZAAKPAY_MERCHANT_IDENTIFIER;
+        const secretKey          = process.env.ZAAKPAY_SECRET_KEY;
+        const zaakpayBaseUrl     = (process.env.ZAAKPAY_BASE_URL || "https://zaakstaging.zaakpay.com").replace(/\/+$/, "");
+
+        const statusFields = { merchantIdentifier, orderId };
+        const checksum = buildZaakpayChecksum(secretKey, statusFields);
+
+        const response = await fetch(`${zaakpayBaseUrl}/api/checkTxnStatus`, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({ ...statusFields, checksum }).toString(),
+        });
+        const body = await response.json().catch(() => null);
+
+        if (!body) {
+            console.error("[Zaakpay verify] unparseable status response for", orderId);
+            return null;
+        }
+
+        console.log("[Zaakpay verify] status response for", orderId, ":", JSON.stringify(body));
+
+        // Zaakpay nests the txn under different keys depending on the account;
+        // check the top level and the common containers.
+        const record = body.orderDetail || body.txnDetail ||
+                       (Array.isArray(body.orders) ? body.orders[0] : null) || body;
+        const code = record.responseCode ?? body.responseCode;
+
+        if (code == null) return null;
+        return String(code).trim() === "100";
+    } catch (err) {
+        console.error("[Zaakpay verify] status check failed for", orderId, ":", err.message);
+        return null;
+    }
+};
+
+/**
  * @desc    Handle Zaakpay V13 return callback (success/failure both land here)
  * @route   POST /api/payment/callback
  * @access  Public (called by Zaakpay)
@@ -297,16 +342,46 @@ const paymentCallback = async (req, res) => {
             ? candidates.find(([, value]) => value === receivedChecksum)
             : null;
 
-        if (!matched) {
-            console.error(
+        let verifiedBy = matched ? matched[0] : null;
+
+        if (!verifiedBy) {
+            // We could not reproduce Zaakpay's response signature. Rather than
+            // failing a payment that may well have succeeded, ask Zaakpay directly
+            // over a server-to-server call — an answer from their API is at least
+            // as trustworthy as a checksum on a browser-posted form.
+            console.warn(
                 "Zaakpay checksum verification failed for orderId:", orderId,
                 "| received:", receivedChecksum,
                 "| tried:", JSON.stringify(Object.fromEntries(candidates)),
-                "| responseCode:", responseCode
+                "| responseCode:", responseCode,
+                "— falling back to Check Transaction Status API"
             );
-            return res.redirect(`${frontendUrl}/payment/failure?txnid=${orderId || ""}&reason=checksum`);
+
+            if (!orderId) {
+                return res.redirect(`${frontendUrl}/payment/failure?reason=checksum`);
+            }
+
+            const confirmed = await confirmTransactionWithZaakpay(orderId);
+
+            if (confirmed === true) {
+                verifiedBy = "status-api";
+            } else if (confirmed === false) {
+                console.warn("[Zaakpay] status API reports failure for", orderId);
+                const failedOrder = await Order.findOne({ paymentId: orderId });
+                if (failedOrder) {
+                    failedOrder.paymentStatus = "Failed";
+                    failedOrder.status = "Cancelled";
+                    await failedOrder.save();
+                }
+                return res.redirect(`${frontendUrl}/payment/failure?txnid=${orderId}`);
+            } else {
+                // Indeterminate: do NOT mark the order failed — money may have been
+                // taken. Leave it Pending for manual reconciliation.
+                console.error("[Zaakpay] could not determine status for", orderId, "— left Pending");
+                return res.redirect(`${frontendUrl}/payment/failure?txnid=${orderId}&reason=unverified`);
+            }
         }
-        console.log(`[Zaakpay callback] checksum verified via ${matched[0]} for orderId=${orderId}`);
+        console.log(`[Zaakpay callback] payment verified via ${verifiedBy} for orderId=${orderId}`);
 
         // Find the order (our txnid == Zaakpay's orderId)
         const order = await Order.findOne({ paymentId: orderId });
@@ -329,6 +404,14 @@ const paymentCallback = async (req, res) => {
                 "| description:", payload.responseDescription
             );
             return res.redirect(`${frontendUrl}/payment/failure?txnid=${orderId}`);
+        }
+
+        // Idempotency: Zaakpay may deliver the callback more than once, and the
+        // status-API fallback can re-run on a retry. Only apply the side effects
+        // (stock decrement, emails) the first time this order is marked paid.
+        if (order.paymentStatus === "Success" || order.paymentStatus === "Partial") {
+            console.log("[Zaakpay callback] order already settled, skipping side effects:", orderId);
+            return res.redirect(`${frontendUrl}/payment/success?txnid=${orderId}&mihpayid=${zaakpayTxnId || ""}`);
         }
 
         order.paymentStatus = order.paymentMethod === "PARTIAL" ? "Partial" : "Success";
